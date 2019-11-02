@@ -4,6 +4,7 @@ from keras.layers import Dense, Input, BatchNormalization, Layer, Concatenate, C
     Reshape, Permute, ZeroPadding2D, Conv2D, Conv2DTranspose
 from keras.utils import plot_model
 import keras.backend as tf_backend
+
 import numpy as np
 from pyquaternion import Quaternion
 from matplotlib import pyplot as plt
@@ -150,7 +151,7 @@ def VFE_preprocessing(points, xSize, ySize, zSize, sampleSize, maxVoxelX, maxVox
                 indices.append((voxel[2],) + voxel[:2] + (i, j))
                 values.append(appendedPoints[voxel][i][j])
     # return as z, x, y
-    return SparseTensor(indices=indices, values=values, dense_shape=[maxVoxelZ*2, maxVoxelX*2, maxVoxelY*2, sampleSize,6])
+    return SparseTensor(indices=indices, values=values, dense_shape=[maxVoxelZ, maxVoxelX*2, maxVoxelY*2, sampleSize,6])
 
 
 def addVFELayer(layer, startNum, endNum):
@@ -243,6 +244,7 @@ def createModel(nx, ny, nz, maxPoints):
 def main():
     # Set constants
     dataDir = 'C:\\Users\\pmwws\\Documents\\ML project\\3d-object-detection-for-autonomous-vehicles'
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
     # load first sample from first scene
     testScene = level5Data.scene[0]
@@ -254,18 +256,21 @@ def main():
     # plt.axis('equal')
     # plt.scatter(np.clip(testSampleLidarPoints[:,0],-50,50), np.clip(testSampleLidarPoints[:,1],-50,50), s=1, c='#000000')
 
-    import time
-    testSampleLidarPoints = combine_lidar_data(testSample, dataDir)
-    startTime = time.time()
-    testVFEPoints = VFE_preprocessing(testSampleLidarPoints, voxelx, voxely, voxelz, maxPoints, nx // 2, ny // 2, nz)
-    endTime = time.time()
-    print(endTime - startTime)
-    print(testVFEPoints.shape)
+    # import time
+    # testSampleLidarPoints = combine_lidar_data(testSample, dataDir)
+    # startTime = time.time()
+    # testVFEPoints = VFE_preprocessing(testSampleLidarPoints, voxelx, voxely, voxelz, maxPoints, nx // 2, ny // 2, nz)
+    # endTime = time.time()
+    # print(endTime - startTime)
+    # print(testVFEPoints.shape)
 
     model = createModel(nx, ny, nz, maxPoints)
     plot_model(model, show_shapes=True)
-
-
+    model.compile('sgd',['mse', 'mse'])
+    # model.fit(testVFEPoints, steps_per_epoch=1, epochs=1)
+    # testVFEPoints = testVFEPoints.reshape((-1,) + testVFEPoints.shape)
+    # p = model.predict(testVFEPoints, verbose=1, steps=1)
+    # print(p)
 
 
 if __name__ == '__main__':
