@@ -30,11 +30,10 @@ maxPoints = 35
 # index of points in input tensor
 pointIndex = -2
 
-
 # # load dataset
 level5Data = LyftDataset(
-    data_path='E:\\CS539 Machine Learning\\3d-object-detection-for-autonomous-vehicles',
-    json_path='E:\\CS539 Machine Learning\\3d-object-detection-for-autonomous-vehicles\\train_data',
+    data_path='C:\\Users\\pmwws\\Documents\\ML project\\3d-object-detection-for-autonomous-vehicles',
+    json_path='C:\\Users\\pmwws\\Documents\\ML project\\3d-object-detection-for-autonomous-vehicles\\train_data',
     verbose=True
 )
 
@@ -148,7 +147,8 @@ def VFE_preprocessing(points, xSize, ySize, zSize, sampleSize, maxVoxelX, maxVox
                 indices.append((voxel[2],) + voxel[:2] + (i, j))
                 values.append(appendedPoints[voxel][i][j])
     # return as z, x, y
-    return SparseTensor(indices=indices, values=values, dense_shape=[maxVoxelZ, maxVoxelX*2, maxVoxelY*2, sampleSize,6])
+    return SparseTensor(indices=indices, values=values,
+                        dense_shape=[maxVoxelZ, maxVoxelX * 2, maxVoxelY * 2, sampleSize, 6])
 
 
 def addVFELayer(layer, startNum, endNum):
@@ -163,9 +163,21 @@ def addVFELayer(layer, startNum, endNum):
 
 
 def addFCN(layer, startNum, endNum):
-    layer = tf.keras.layers.Dense(endNum, input_shape=layer.shape[1:])(layer)
+    layer = addDenseLayer(layer, endNum)
     layer = BatchNormalization()(layer)
-    layer = Dense(endNum, activation='relu')(layer)
+    layer = addDenseLayer(layer, endNum, 'relu')
+    return layer
+
+
+# keras dense layers don't support tensor with rank 5 and above, so we need to temporarily reshape
+def addDenseLayer(layer, units, act=None):
+    oldShape = layer.shape[1:]
+    pointShape = layer.shape[-2:]
+    combineVoxel = np.prod(np.array(layer.shape[1:-2]))
+    shape = (combineVoxel,) + pointShape
+    layer = Reshape(shape)(layer)
+    layer = Dense(units, input_shape=(layer.shape[1:]), activation=act)(layer)
+    layer = Reshape(oldShape[:-1] + (units,))(layer)
     return layer
 
 
@@ -175,7 +187,7 @@ def addConv3DLayer(layer, cin, cout, k, s, p):
     layer = ZeroPadding3D(padding=p)(layer)
     layer = Conv3D(cout, kernel_size=k, strides=s, padding='valid')(layer)
     layer = BatchNormalization()(layer)
-    layer = Dense(layer.shape[-1], activation='relu')(layer)
+    layer = addDenseLayer(layer, layer.shape[-1], 'relu')
     return layer
 
 
@@ -185,7 +197,7 @@ def addConv2DLayer(layer, cin, cout, k, s, p):
     layer = ZeroPadding2D(padding=p)(layer)
     layer = Conv2D(cout, kernel_size=k, strides=s)(layer)
     layer = BatchNormalization()(layer)
-    layer = Dense(layer.shape[-1], activation='relu')(layer)
+    layer = addDenseLayer(layer, layer.shape[-1], 'relu')
     return layer
 
 
@@ -241,12 +253,14 @@ def createModel(nx, ny, nz, maxPoints):
 
 def main():
     # Set constants
-    dataDir = 'E:\\CS539 Machine Learning\\3d-object-detection-for-autonomous-vehicles'
+    dataDir = 'C:\\Users\\pmwws\\Documents\\ML project\\3d-object-detection-for-autonomous-vehicles'
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
     # load first sample from first scene
     testScene = level5Data.scene[0]
     testSample = level5Data.get('sample', testScene['first_sample_token'])
+    # tf.enable_eager_execution()
+    # tf.debugging.set_log_device_placement(True)
 
     # level5Data.render_sample(testSample['token'])
     # Test view the resulting lidar data.
@@ -264,10 +278,11 @@ def main():
 
     model = createModel(nx, ny, nz, maxPoints)
     plot_model(model, show_shapes=True)
-    model.compile('sgd',['mse', 'mse'])
+    model.compile('sgd', ['mse', 'mse'])
     # model.fit(testVFEPoints, steps_per_epoch=1, epochs=1)
     testVFEPoints = sparse.reshape(testVFEPoints, (1,) + testVFEPoints.shape)
     testVFEPoints = sparse.to_dense(testVFEPoints, default_value=0., validate_indices=False)
+    testTensor = tf.stack([testVFEPoints, testVFEPoints, testVFEPoints])
     p = model.predict(testVFEPoints, verbose=1, steps=1, batch_size=1)
     print(p)
 
