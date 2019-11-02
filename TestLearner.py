@@ -1,16 +1,17 @@
 from lyft_dataset_sdk.lyftdataset import LyftDataset
-from keras.models import Model
-from keras.layers import Dense, Input, BatchNormalization, Layer, Concatenate, Conv3D, ZeroPadding3D, \
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Dense, Input, BatchNormalization, Layer, Concatenate, Conv3D, ZeroPadding3D, \
     Reshape, Permute, ZeroPadding2D, Conv2D, Conv2DTranspose
-from keras.utils import plot_model
-import keras.backend as tf_backend
+from tensorflow.keras.utils import plot_model
+import tensorflow.keras.backend as tf_backend
+import tensorflow as tf
 
 import numpy as np
 from pyquaternion import Quaternion
 from matplotlib import pyplot as plt
 from math import floor
 import os
-from tensorflow import SparseTensor
+from tensorflow import SparseTensor, sparse
 
 # constants
 # size of voxel
@@ -30,10 +31,10 @@ maxPoints = 35
 pointIndex = -2
 
 
-# load dataset
+# # load dataset
 level5Data = LyftDataset(
-    data_path='C:\\Users\\pmwws\\Documents\\ML project\\3d-object-detection-for-autonomous-vehicles',
-    json_path='C:\\Users\\pmwws\\Documents\\ML project\\3d-object-detection-for-autonomous-vehicles\\train_data',
+    data_path='E:\\CS539 Machine Learning\\3d-object-detection-for-autonomous-vehicles',
+    json_path='E:\\CS539 Machine Learning\\3d-object-detection-for-autonomous-vehicles\\train_data',
     verbose=True
 )
 
@@ -116,17 +117,13 @@ def VFE_preprocessing(points, xSize, ySize, zSize, sampleSize, maxVoxelX, maxVox
         key = get_voxel(point, xSize, ySize, zSize)
         if -maxVoxelX < key[0] and key[0] < maxVoxelX \
                 and -maxVoxelY < key[1] and key[1] < maxVoxelY \
-                and -maxVoxelZ < key[2] and key[2] < maxVoxelZ:
-            if key in clusteredPoints:
-                clusteredPoints[key].append(idx)
+                and 0 < key[2] and key[2] < maxVoxelZ:
+            # remove negatives.
+            fixedKey = (key[0] + maxVoxelX, key[1] + maxVoxelY, key[2])
+            if fixedKey in clusteredPoints:
+                clusteredPoints[fixedKey].append(idx)
             else:
-                clusteredPoints[key] = [idx]
-    # Add voxels that are empty
-    # for z in range(maxVoxelZ + 1):
-    #     for y in range(-maxVoxelY, maxVoxelY + 1):
-    #         for x in range(-maxVoxelX, maxVoxelX + 1):
-    #             if (x, y, z) not in clusteredPoints:
-    #                 clusteredPoints[(x, y, z)] = []
+                clusteredPoints[fixedKey] = [idx]
     # Sample points and fil the rest of the voxel if not full
     appendedPoints = {}
     for voxel in clusteredPoints:
@@ -166,7 +163,7 @@ def addVFELayer(layer, startNum, endNum):
 
 
 def addFCN(layer, startNum, endNum):
-    layer = Dense(endNum)(layer)
+    layer = tf.keras.layers.Dense(endNum, input_shape=layer.shape[1:])(layer)
     layer = BatchNormalization()(layer)
     layer = Dense(endNum, activation='relu')(layer)
     return layer
@@ -211,7 +208,8 @@ def createModel(nx, ny, nz, maxPoints):
 
     # Input is a tensor that separates each voxel. Empty voxels are all 0.
     # VFE layers
-    inLayer = Input(shape=(nz, nx, ny, maxPoints, 6), name='InputVoxel')
+    inputShape = (nz, nx, ny, maxPoints, 6)
+    inLayer = Input(shape=inputShape, name='InputVoxel')
     outLayer = addVFELayer(inLayer, 6, 32)
     outLayer = addVFELayer(outLayer, 32, 128)
     outLayer = addFCN(outLayer, 128, 128)
@@ -243,7 +241,7 @@ def createModel(nx, ny, nz, maxPoints):
 
 def main():
     # Set constants
-    dataDir = 'C:\\Users\\pmwws\\Documents\\ML project\\3d-object-detection-for-autonomous-vehicles'
+    dataDir = 'E:\\CS539 Machine Learning\\3d-object-detection-for-autonomous-vehicles'
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
     # load first sample from first scene
@@ -256,21 +254,22 @@ def main():
     # plt.axis('equal')
     # plt.scatter(np.clip(testSampleLidarPoints[:,0],-50,50), np.clip(testSampleLidarPoints[:,1],-50,50), s=1, c='#000000')
 
-    # import time
-    # testSampleLidarPoints = combine_lidar_data(testSample, dataDir)
-    # startTime = time.time()
-    # testVFEPoints = VFE_preprocessing(testSampleLidarPoints, voxelx, voxely, voxelz, maxPoints, nx // 2, ny // 2, nz)
-    # endTime = time.time()
-    # print(endTime - startTime)
-    # print(testVFEPoints.shape)
+    import time
+    testSampleLidarPoints = combine_lidar_data(testSample, dataDir)
+    startTime = time.time()
+    testVFEPoints = VFE_preprocessing(testSampleLidarPoints, voxelx, voxely, voxelz, maxPoints, nx // 2, ny // 2, nz)
+    endTime = time.time()
+    print(endTime - startTime)
+    print(testVFEPoints.shape)
 
     model = createModel(nx, ny, nz, maxPoints)
     plot_model(model, show_shapes=True)
     model.compile('sgd',['mse', 'mse'])
     # model.fit(testVFEPoints, steps_per_epoch=1, epochs=1)
-    # testVFEPoints = testVFEPoints.reshape((-1,) + testVFEPoints.shape)
-    # p = model.predict(testVFEPoints, verbose=1, steps=1)
-    # print(p)
+    testVFEPoints = sparse.reshape(testVFEPoints, (1,) + testVFEPoints.shape)
+    testVFEPoints = sparse.to_dense(testVFEPoints, default_value=0., validate_indices=False)
+    p = model.predict(testVFEPoints, verbose=1, steps=1, batch_size=1)
+    print(p)
 
 
 if __name__ == '__main__':
