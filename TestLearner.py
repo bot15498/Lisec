@@ -276,15 +276,17 @@ def main():
     print(endTime - startTime)
     print(testVFEPoints.shape)
 
-    model = createModel(nx, ny, nz, maxPoints)
-    plot_model(model, show_shapes=True)
-    model.compile('sgd', ['mse', 'mse'])
-    # model.fit(testVFEPoints, steps_per_epoch=1, epochs=1)
-    testVFEPoints = sparse.reshape(testVFEPoints, (1,) + testVFEPoints.shape)
-    testVFEPoints = sparse.to_dense(testVFEPoints, default_value=0., validate_indices=False)
-    testTensor = tf.stack([testVFEPoints, testVFEPoints, testVFEPoints])
-    p = model.predict(testVFEPoints, verbose=1, steps=1, batch_size=1)
-    print(p)
+    with tf.device('/device:CPU:0'):
+
+        model = createModel(nx, ny, nz, maxPoints)
+        plot_model(model, show_shapes=True)
+        model.compile('sgd', ['mse', 'mse'])
+        # model.fit(testVFEPoints, steps_per_epoch=1, epochs=1)
+        testVFEPoints = sparse.reshape(testVFEPoints, (1,) + testVFEPoints.shape)
+        testVFEPoints = sparse.to_dense(testVFEPoints, default_value=0., validate_indices=False)
+        # testTensor = tf.stack([testVFEPoints, testVFEPoints, testVFEPoints])
+        p = model.predict(testVFEPoints, verbose=1, steps=1, batch_size=1)
+        print(p)
 
 
 if __name__ == '__main__':
