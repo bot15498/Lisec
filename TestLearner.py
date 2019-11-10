@@ -5,6 +5,7 @@ from tensorflow.keras.layers import Dense, Input, BatchNormalization, Layer, Con
 from tensorflow.keras.utils import plot_model
 import tensorflow.keras.backend as tf_backend
 import tensorflow as tf
+from tensorflow.keras import optimizers
 
 import numpy as np
 from pyquaternion import Quaternion
@@ -376,47 +377,21 @@ def preprocessLabels(data):
     return [outClass, outRegress]
 
 
-def main():
+def main2(sample):
     # Set constants
     dataDir = 'C:\\Users\\pmwws\\Documents\\ML project\\3d-object-detection-for-autonomous-vehicles'
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
-    # load first sample from first scene
-    testScene = level5Data.scene[0]
-    testSample = level5Data.get('sample', testScene['first_sample_token'])
-    # tf.enable_eager_execution()
-    # tf.debugging.set_log_device_placement(True)
-
-    # level5Data.render_sample(testSample['token'])
-    # Test view the resulting lidar data.
-    # plt.figure(figsize=(12, 12))
-    # plt.axis('equal')
-    # plt.scatter(np.clip(testSampleLidarPoints[:,0],-50,50), np.clip(testSampleLidarPoints[:,1],-50,50), s=1, c='#000000')
-
+    # pre-process data
     import time
-    testSampleLidarPoints = combine_lidar_data(testSample, dataDir)
+    testSampleLidarPoints = combine_lidar_data(sample, dataDir)
     startTime = time.time()
     testVFEPoints = VFE_preprocessing(testSampleLidarPoints, voxelx, voxely, voxelz, maxPoints, nx // 2, ny // 2, nz)
     endTime = time.time()
     print(endTime - startTime)
     print(testVFEPoints.shape)
 
-    model = createModel(nx, ny, nz, maxPoints)
-    plot_model(model, show_shapes=True)
-    model.compile('sgd', ['mse', 'mse'])
-    # model.fit(testVFEPoints, steps_per_epoch=1, epochs=1)
-    testVFEPoints = sparse.reshape(testVFEPoints, (1,) + testVFEPoints.shape)
-    # testVFEPoints = sparse.to_dense(testVFEPoints, default_value=0., validate_indices=False)
-    # testTensor = tf.stack([testVFEPoints, testVFEPoints, testVFEPoints])
-    # p = model.predict(testVFEPoints, verbose=1, steps=1, batch_size=1)
-    # print(p)
-
-
-if __name__ == '__main__':
-    # main()
-    scene = level5Data.scene[0]
-    sample = level5Data.get('sample', scene['first_sample_token'])
-    # labels = level5Data.get("sample_annotation", sample['token'])
+    # pre-process labels
     labels = []
     annsTokens = sample['anns']
     for token in annsTokens:
@@ -430,4 +405,19 @@ if __name__ == '__main__':
         row += [catToNum[category]]
         labels.append(row)
     labels = np.array(labels)
-    print(labels)
+    outClass, outRegress = preprocessLabels(labels)
+
+    # create model
+    model = createModel(nx, ny, nz, maxPoints)
+    plot_model(model, show_shapes=True)
+    sgd = optimizers.SGD(lr=0.01, decay=1e-6, momentum=0.9, nesterov=True)
+    model.compile(optimizers=sgd, loss=['mse', 'mse'])
+
+    # fit model
+    model.fit(x=testVFEPoints, y=[outClass, outRegress], batch_size=1, verbose=1, epochs=1)
+
+if __name__ == '__main__':
+    # main()
+    scene = level5Data.scene[0]
+    sample = level5Data.get('sample', scene['first_sample_token'])
+    main2(sample)
