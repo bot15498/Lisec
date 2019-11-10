@@ -1,5 +1,5 @@
 from lyft_dataset_sdk.lyftdataset import LyftDataset
-from tensorflow.keras.models import Model
+from tensorflow.keras.models import Model, load_model
 from tensorflow.keras.layers import Dense, Input, BatchNormalization, Layer, Concatenate, Conv3D, ZeroPadding3D, \
     Reshape, Permute, ZeroPadding2D, Conv2D, Conv2DTranspose
 from tensorflow.keras.utils import plot_model
@@ -74,6 +74,7 @@ class RepeatLayer(Layer):
         return tf_backend.repeat_elements(inputs, maxPoints, pointIndex)
 
 
+
 # special pooling layer for VFE block
 class MaxPoolingVFELayer(Layer):
     def __init__(self, combine=False, **kwargs):
@@ -88,6 +89,11 @@ class MaxPoolingVFELayer(Layer):
 
     def call(self, inputs, **kwargs):
         return tf_backend.max(inputs, axis=pointIndex, keepdims=not self.combineDim)
+
+    def get_config(self):
+        baseConfig = super(MaxPoolingVFELayer, self).get_config()
+        baseConfig['combine'] = self.combineDim
+        return baseConfig
 
 
 # Uses quaternions to rotate all points in a scene to match the location of the lidar sensor on the car.
@@ -392,7 +398,7 @@ def main2(sample):
     print(testVFEPoints.shape)
     # Turn into 6 rank tensor, then convert it to dense because keras is stupid
     testVFEPoints = sparse.reshape(testVFEPoints, (1,) + testVFEPoints.shape)
-    testVFEPoints = sparse.to_dense(testVFEPoints, default_value=0., validate_indices=False)
+    testVFEPointsDense = sparse.to_dense(testVFEPoints, default_value=0., validate_indices=False)
 
     # pre-process labels
     labels = []
@@ -414,15 +420,18 @@ def main2(sample):
 
     # create model
     with tf.device('/device:CPU:0'):
-        model = createModel(nx, ny, nz, maxPoints)
-        plot_model(model, show_shapes=True)
-        sgd = optimizers.SGD(lr=0.01, decay=1e-6, momentum=0.9, nesterov=True)
-        model.compile(optimizers=sgd, loss=['mse', 'mse'])
+        # model = createModel(nx, ny, nz, maxPoints)
+        # plot_model(model, show_shapes=True)
+        # sgd = optimizers.SGD(lr=0.01, decay=1e-6, momentum=0.9, nesterov=True)
+        # model.compile(optimizers=sgd, loss=['mse', 'mse'])
+        model =load_model('models\\Epoch5.h5', custom_objects={'RepeatLayer' : RepeatLayer, 'MaxPoolingVFELayer' : MaxPoolingVFELayer})
 
         # fit model
-        history = model.fit(x=testVFEPoints, y=[outClass, outRegress], batch_size=1, verbose=1, epochs=1)
+        history = model.fit(x=testVFEPointsDense, y=[outClass, outRegress], batch_size=1, verbose=1, epochs=1)
 
         print(history.history)
+        model.save('models\\Epoch6.h5')
+
 
 if __name__ == '__main__':
     scene = level5Data.scene[0]
