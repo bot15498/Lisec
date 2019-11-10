@@ -247,11 +247,12 @@ def createModel(nx, ny, nz, maxPoints):
     inputShape = (nz, nx, ny, maxPoints, 6)
     inLayer = Input(shape=inputShape, name='InputVoxel')
     outLayer = addVFELayer(inLayer, 6, 32)
-    outLayer = addVFELayer(outLayer, 32, 128)
-    outLayer = addFCN(outLayer, 128, 128)
+    # outLayer = addVFELayer(outLayer, 32, 128)
+    outLayer = addVFELayer(outLayer, 32, 64)
+    outLayer = addFCN(outLayer, 64, 64)
     # Convolution layers. Just use default convolution algorithm.
     outLayer = MaxPoolingVFELayer(combine=True)(outLayer)
-    outLayer = addConv3DLayer(outLayer, 128, 64, 3, (2, 1, 1), (1, 1, 1))
+    outLayer = addConv3DLayer(outLayer, 64, 64, 3, (2, 1, 1), (1, 1, 1))
     outLayer = addConv3DLayer(outLayer, 64, 64, 3, (1, 1, 1), (0, 1, 1))
     outLayer = addConv3DLayer(outLayer, 64, 64, 3, (2, 1, 1), (1, 1, 1))
     # RPN layer time
@@ -423,6 +424,7 @@ def main2(sample):
         history = model.fit(x=testVFEPoints, y=[outClass, outRegress], batch_size=1, verbose=1, epochs=1)
 
         print(history.history)
+        model.save('models\\10Epoch.h5')
 
 if __name__ == '__main__':
     scene = level5Data.scene[0]
