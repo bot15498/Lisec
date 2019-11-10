@@ -56,8 +56,8 @@ catToNum = {
 
 # # load dataset
 level5Data = LyftDataset(
-    data_path='C:\\Users\\pmwws\\Documents\\ML project\\3d-object-detection-for-autonomous-vehicles',
-    json_path='C:\\Users\\pmwws\\Documents\\ML project\\3d-object-detection-for-autonomous-vehicles\\train_data',
+    data_path='E:\\CS539 Machine Learning\\3d-object-detection-for-autonomous-vehicles',
+    json_path='E:\\CS539 Machine Learning\\3d-object-detection-for-autonomous-vehicles\\train_data',
     verbose=True
 )
 
@@ -379,7 +379,7 @@ def preprocessLabels(data):
 
 def main2(sample):
     # Set constants
-    dataDir = 'C:\\Users\\pmwws\\Documents\\ML project\\3d-object-detection-for-autonomous-vehicles'
+    dataDir = 'E:\\CS539 Machine Learning\\3d-object-detection-for-autonomous-vehicles'
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
     # pre-process data
