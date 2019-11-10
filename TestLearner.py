@@ -344,7 +344,7 @@ def preprocessLabels(data):
     outClassCheck = np.zeros((outX, outY, len(anchors)))  # used to keep track of past IoUs
 
     # scale back l and w because we cut the size of the feature space by 2 through our network
-    fixedData = data * fixBoxScaling((1, 2), outX, outY, nx, ny)
+    fixedData = data * fixBoxScaling(data.shape, outX, outY, nx, ny)
 
     # Iterate through anchors and bounding boxes in fixedData and update outRegress and outClass as necessary based on IoU
     centerZ = -0.5  # hard set z center of anchors to -.05 dude just trust me.
@@ -390,6 +390,9 @@ def main2(sample):
     endTime = time.time()
     print(endTime - startTime)
     print(testVFEPoints.shape)
+    # Turn into 6 rank tensor, then convert it to dense because keras is stupid
+    testVFEPoints = sparse.reshape(testVFEPoints, (1,) + testVFEPoints.shape)
+    testVFEPoints = sparse.to_dense(testVFEPoints, default_value=0., validate_indices=False)
 
     # pre-process labels
     labels = []
@@ -406,18 +409,22 @@ def main2(sample):
         labels.append(row)
     labels = np.array(labels)
     outClass, outRegress = preprocessLabels(labels)
+    outClass = np.reshape(outClass, (1,) + outClass.shape)
+    outRegress = np.reshape(outRegress, (1,) + outRegress.shape)
 
     # create model
-    model = createModel(nx, ny, nz, maxPoints)
-    plot_model(model, show_shapes=True)
-    sgd = optimizers.SGD(lr=0.01, decay=1e-6, momentum=0.9, nesterov=True)
-    model.compile(optimizers=sgd, loss=['mse', 'mse'])
+    with tf.device('/device:CPU:0'):
+        model = createModel(nx, ny, nz, maxPoints)
+        plot_model(model, show_shapes=True)
+        sgd = optimizers.SGD(lr=0.01, decay=1e-6, momentum=0.9, nesterov=True)
+        model.compile(optimizers=sgd, loss=['mse', 'mse'])
 
-    # fit model
-    model.fit(x=testVFEPoints, y=[outClass, outRegress], batch_size=1, verbose=1, epochs=1)
+        # fit model
+        history = model.fit(x=testVFEPoints, y=[outClass, outRegress], batch_size=1, verbose=1, epochs=1)
+
+        print(history.history)
 
 if __name__ == '__main__':
-    # main()
     scene = level5Data.scene[0]
     sample = level5Data.get('sample', scene['first_sample_token'])
     main2(sample)
