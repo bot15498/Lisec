@@ -56,8 +56,8 @@ catToNum = {
 
 # # load dataset
 level5Data = LyftDataset(
-    data_path='E:\\CS539 Machine Learning\\3d-object-detection-for-autonomous-vehicles',
-    json_path='E:\\CS539 Machine Learning\\3d-object-detection-for-autonomous-vehicles\\train_data',
+    data_path='C:\\Users\\pmwws\\Documents\\ML project\\3d-object-detection-for-autonomous-vehicles',
+    json_path='C:\\Users\\pmwws\\Documents\\ML project\\3d-object-detection-for-autonomous-vehicles\\train_data',
     verbose=True
 )
 
@@ -253,11 +253,12 @@ def createModel(nx, ny, nz, maxPoints):
     inputShape = (nz, nx, ny, maxPoints, 6)
     inLayer = Input(shape=inputShape, name='InputVoxel')
     outLayer = addVFELayer(inLayer, 6, 32)
-    outLayer = addVFELayer(outLayer, 32, 128)
-    outLayer = addFCN(outLayer, 128, 128)
+    # outLayer = addVFELayer(outLayer, 32, 128)
+    outLayer = addVFELayer(outLayer, 32, 64)
+    outLayer = addFCN(outLayer, 64, 64)
     # Convolution layers. Just use default convolution algorithm.
     outLayer = MaxPoolingVFELayer(combine=True)(outLayer)
-    outLayer = addConv3DLayer(outLayer, 128, 64, 3, (2, 1, 1), (1, 1, 1))
+    outLayer = addConv3DLayer(outLayer, 64, 64, 3, (2, 1, 1), (1, 1, 1))
     outLayer = addConv3DLayer(outLayer, 64, 64, 3, (1, 1, 1), (0, 1, 1))
     outLayer = addConv3DLayer(outLayer, 64, 64, 3, (2, 1, 1), (1, 1, 1))
     # RPN layer time
@@ -385,7 +386,7 @@ def preprocessLabels(data):
 
 def main2(sample):
     # Set constants
-    dataDir = 'E:\\CS539 Machine Learning\\3d-object-detection-for-autonomous-vehicles'
+    dataDir = 'C:\\Users\\pmwws\\Documents\\ML project\\3d-object-detection-for-autonomous-vehicles'
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
     # pre-process data
