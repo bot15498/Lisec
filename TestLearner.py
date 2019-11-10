@@ -340,8 +340,10 @@ def preprocessLabels(data):
     voxelYSize = voxely * 2 * 100
     # size is based off nx and ny (just divide by 2). 7 comes from x, y, z, l ,w ,h, yaw
     outRegress = np.zeros((outX, outY, len(anchors) * 7))
-    outClass = np.zeros((outX, outY, len(anchors)))
-    outClassCheck = np.zeros((outX, outY, len(anchors)))  # used to keep track of past IoUs
+    outValidBox = np.zeros((outX, outY, len(anchors)))
+    outRpnOverlap = np.zeros((outX, outY, len(anchors)))
+
+    bestIouForBox = np.zeros(len(data))
 
     # scale back l and w because we cut the size of the feature space by 2 through our network
     fixedData = data * fixBoxScaling((1, 2), outX, outY, nx, ny)
@@ -360,17 +362,26 @@ def preprocessLabels(data):
                     continue
                 # if we get here, then the anchor is within the range of the area we want to look at
                 # now look at every bounding box for best IoU
-                for box in fixedData:
+                boxType = 'neg'
+                for i in range(len(fixedData)):
                     # Create anchorbox representation using set anchro sizes and add 0 for yaw.
                     anchorBox = [centerX, centerY, centerZ] + anchors[i] + [0]
-                    iou = calculateIoU(anchorBox, box)
-                    if iou > iouUpperBound:
-                        outClass[xVoxel, yVoxel, i] = 2
-                    elif iou < iouLowerBound:
-                        # assumes all anchors start as 'neg'
-                        outClass[xVoxel, yVoxel, i] = 0
-                    else:
-                        outClass[xVoxel, yVoxel, i] = 1
+                    iou = calculateIoU(anchorBox, fixedData[i])
+                    if iou > bestIouForBox[i] or iou > iouUpperBound:
+                        pass
+
+                if boxType == 'neg':
+                    # box is positive
+                    outValidBox[xVoxel, yVoxel, i] = 1
+                    outRpnOverlap[xVoxel, yVoxel, i] = 1
+                elif boxType == 'neutral':
+                    # box is negative
+                    outValidBox[xVoxel, yVoxel, i] = 1
+                    outRpnOverlap[xVoxel, yVoxel, i] = 0
+                elif boxType == 'pos':
+                    outValidBox[xVoxel, yVoxel, i] = 0
+                    outRpnOverlap[xVoxel, yVoxel, i] = 0
+
                     if iou > outClassCheck[xVoxel, yVoxel, i]:
                         # TODO put the update to the regression mapping here (I think)
                         outClassCheck[xVoxel, yVoxel, i] = iou
@@ -405,6 +416,8 @@ def main2(sample):
         row += [catToNum[category]]
         labels.append(row)
     labels = np.array(labels)
+    # for right now, only care about cars
+
     outClass, outRegress = preprocessLabels(labels)
 
     # create model
