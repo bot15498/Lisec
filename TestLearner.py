@@ -19,16 +19,37 @@ voxelx = 0.5
 voxely = 0.25
 voxelz = 0.25
 
+# max size of space to look at
+
+
 # Number of voxels in space that we care about
-nx = int(100 / voxelx)
+nx = int(100 / voxelx)  # -50 to 50 m
 ny = int(100 / voxely)
 nz = int(2 / voxelz)
+
+# number of anchors
+anchors = [[1.6, 3.9, 1.56],[3.9, 1.6, 1.56]]
+iouLowerBound = 0.45
+iouUpperBound = 0.6
 
 # Limit of points per voxel to reduce size of data.
 maxPoints = 35
 
 # index of points in input tensor
 pointIndex = -2
+
+# map of categories:
+catToNum = {
+    'car': 0,
+    'pedestrian': 1,
+    'animal': 2,
+    'other_vehicle': 3,
+    'bus': 4,
+    'motorcycle': 5,
+    'truck': 6,
+    'emergency_vehicle': 7,
+    'bicycle': 8
+}
 
 # # load dataset
 level5Data = LyftDataset(
@@ -251,6 +272,85 @@ def createModel(nx, ny, nz, maxPoints):
     return model
 
 
+def calculateIntersection(box1, box2):
+    #TODO this
+    pass
+
+
+def calculateUnion(box1, box2, intersect):
+    box1Vol = box1[3] * box1[4] * box1[5]
+    box2Vol = box2[3] * box2[4] * box2[5]
+    return box1Vol + box2Vol - intersect
+
+
+def calculateIoU(box1, box2):
+    '''
+    Calculate Intersection over union for two boxes
+    :param box1: the annotations row for first box. Should be in form <x, y, z, l, w, h, yaw>
+    :param box2: the annotations row for second box
+    :return: IoU value
+    '''
+    intersect = calculateIntersection(box1, box2)
+    union = calculateUnion(box1, box2, intersect)
+    return intersect / union
+
+
+def fixBoxScaling(dataSize, newX, newY, origX, origY):
+    out = np.ones(dataSize)
+    out = out.transpose()
+    out[3] = [newX / origX for i in range(len(out[3]))]
+    out[4] = [newY / origY for i in range(len(out[4]))]
+    return out.transpose()
+
+
+def translateToRegion(data):
+    # TODO this
+    pass
+
+
+def preprocessLabels(data):
+    # ASSUMES THAT OUTPUT OF RPN IS MAP DIVIDED BY 2. Our network does this.
+    # Assumes data input is in cm.
+    outX = nx // 2
+    outY = ny // 2
+    voxelXSize = voxelx * 2 * 100
+    voxelYSize = voxely * 2 * 100
+    # size is based off nx and ny (just divide by 2). 7 comes from x, y, z, l ,w ,h, yaw
+    outRegress = np.zeros((outX, outY, len(anchors) * 7))
+    outClass = np.zeros((outX, outY, len(anchors)))
+    outClassCheck = np.zeros((outX, outY, len(anchors))) # used to keep track of past IoUs
+
+    # scale back l and w because we cut the size of the feature space by 2 through our network
+    fixedData = data * fixBoxScaling((1, 2), outX, outY, nx, ny)
+
+    # Iterate through anchors and bounding boxes in fixedData and update outRegress and outClass as necessary based on IoU
+    centerZ = -0.5 # hard set z center of anchors to -.05 dude just trust me.
+    for i in range(len(anchors)):
+        for xVoxel in range(outX):
+            # Do calculations in terms of cm now.
+            centerX = voxelXSize * xVoxel + (voxelXSize / 2)
+            if centerX - (anchors[i][0] / 2) < 0 or centerX + (anchors[i][0] / 2) > voxelXSize * outX:
+                continue
+            for yVoxel in range(outY):
+                centerY = voxelYSize * yVoxel + (voxelYSize / 2)
+                if centerY - (anchors[i][1] / 2) < 0 or centerY + (anchors[i][1] / 2) > voxelYSize * outY:
+                    continue
+                # if we get here, then the anchor is within the range of the area we want to look at
+                # now look at every bounding box for best IoU
+                for box in fixedData:
+                    # Create anchorbox representation using set anchro sizes and add 0 for yaw.
+                    anchorBox = [centerX, centerY, centerZ] + anchors[i] + [0]
+                    iou = calculateIoU(anchorBox, box)
+                    if iou > iouUpperBound:
+                        outClass[xVoxel, yVoxel, i] = 1
+                    elif iou < iouLowerBound:
+                        outClass[xVoxel, yVoxel, i] = -1
+                    if iou > outClassCheck[xVoxel, yVoxel, i]:
+                        # TODO put the update to the regression mapping here (I think)
+                        outClassCheck[xVoxel, yVoxel, i] = iou
+    return [outClass, outRegress]
+
+
 def main():
     # Set constants
     dataDir = 'C:\\Users\\pmwws\\Documents\\ML project\\3d-object-detection-for-autonomous-vehicles'
@@ -281,11 +381,28 @@ def main():
     model.compile('sgd', ['mse', 'mse'])
     # model.fit(testVFEPoints, steps_per_epoch=1, epochs=1)
     testVFEPoints = sparse.reshape(testVFEPoints, (1,) + testVFEPoints.shape)
-    testVFEPoints = sparse.to_dense(testVFEPoints, default_value=0., validate_indices=False)
-    testTensor = tf.stack([testVFEPoints, testVFEPoints, testVFEPoints])
-    p = model.predict(testVFEPoints, verbose=1, steps=1, batch_size=1)
-    print(p)
+    # testVFEPoints = sparse.to_dense(testVFEPoints, default_value=0., validate_indices=False)
+    # testTensor = tf.stack([testVFEPoints, testVFEPoints, testVFEPoints])
+    # p = model.predict(testVFEPoints, verbose=1, steps=1, batch_size=1)
+    # print(p)
 
 
 if __name__ == '__main__':
-    main()
+    # main()
+    scene = level5Data.scene[0]
+    sample = level5Data.get('sample', scene['first_sample_token'])
+    # labels = level5Data.get("sample_annotation", sample['token'])
+    labels = []
+    annsTokens = sample['anns']
+    for token in annsTokens:
+        ann = level5Data.get('sample_annotation', token)
+        row = ann['translation']
+        row += ann['size']
+        quaternion = Quaternion(ann['rotation'])
+        row += [quaternion.yaw_pitch_roll[0]]
+        instance = level5Data.get('instance', ann['instance_token'])
+        category = level5Data.get('category', instance['category_token'])['name']
+        row += [catToNum[category]]
+        labels.append(row)
+    labels = np.array(labels)
+    print(labels)
