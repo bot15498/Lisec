@@ -12,6 +12,8 @@ from matplotlib import pyplot as plt
 from math import floor
 import os
 from tensorflow import SparseTensor, sparse
+import math
+from shapely.geometry import Polygon
 
 # constants
 # size of voxel
@@ -28,7 +30,7 @@ ny = int(100 / voxely)
 nz = int(2 / voxelz)
 
 # number of anchors
-anchors = [[1.6, 3.9, 1.56],[3.9, 1.6, 1.56]]
+anchors = [[1.6, 3.9, 1.56], [3.9, 1.6, 1.56]]
 iouLowerBound = 0.45
 iouUpperBound = 0.6
 
@@ -273,8 +275,28 @@ def createModel(nx, ny, nz, maxPoints):
 
 
 def calculateIntersection(box1, box2):
-    #TODO this
-    pass
+    # create shapely polygons and find intersection.
+    box1P = boxToShapely(box1)
+    box2P = boxToShapely(box2)
+    area = box1P.intersection(box2P).area
+    # find greates lower bound of z and lowest upper bound, then multiply.
+    botZ = max(box1[2] - box1[5], box2[2] - box2[5])
+    topZ = min(box1[2] + box1[5], box2[2] + box2[5])
+    return (topZ - botZ) * area
+
+
+def boxToShapely(box):
+    theta = math.radians(box[6])
+    length = box[3]
+    width = box[4]
+    refPointRight = (box[0] + math.cos(theta) * (width / 2), box[1] - math.sin(theta) * (width / 2))
+    refPointLeft = (box[0] - math.cos(theta) * (width / 2), box[1] + math.sin(theta) * (width / 2))
+    # for these points switch cos and sin to represent doing it on 90 - theta
+    topRight = [refPointRight[0] + math.sin(theta) * (length / 2), refPointRight[1] + math.cos(theta) * (length / 2)]
+    botRight = [refPointRight[0] - math.sin(theta) * (length / 2), refPointRight[1] - math.cos(theta) * (length / 2)]
+    topLeft = [refPointLeft[0] + math.sin(theta) * (length / 2), refPointLeft[1] + math.cos(theta) * (length / 2)]
+    botLeft = [refPointLeft[0] - math.sin(theta) * (length / 2), refPointLeft[1] - math.cos(theta) * (length / 2)]
+    return Polygon([topRight, botRight, botLeft, topLeft])
 
 
 def calculateUnion(box1, box2, intersect):
@@ -318,13 +340,13 @@ def preprocessLabels(data):
     # size is based off nx and ny (just divide by 2). 7 comes from x, y, z, l ,w ,h, yaw
     outRegress = np.zeros((outX, outY, len(anchors) * 7))
     outClass = np.zeros((outX, outY, len(anchors)))
-    outClassCheck = np.zeros((outX, outY, len(anchors))) # used to keep track of past IoUs
+    outClassCheck = np.zeros((outX, outY, len(anchors)))  # used to keep track of past IoUs
 
     # scale back l and w because we cut the size of the feature space by 2 through our network
     fixedData = data * fixBoxScaling((1, 2), outX, outY, nx, ny)
 
     # Iterate through anchors and bounding boxes in fixedData and update outRegress and outClass as necessary based on IoU
-    centerZ = -0.5 # hard set z center of anchors to -.05 dude just trust me.
+    centerZ = -0.5  # hard set z center of anchors to -.05 dude just trust me.
     for i in range(len(anchors)):
         for xVoxel in range(outX):
             # Do calculations in terms of cm now.
@@ -342,9 +364,12 @@ def preprocessLabels(data):
                     anchorBox = [centerX, centerY, centerZ] + anchors[i] + [0]
                     iou = calculateIoU(anchorBox, box)
                     if iou > iouUpperBound:
-                        outClass[xVoxel, yVoxel, i] = 1
+                        outClass[xVoxel, yVoxel, i] = 2
                     elif iou < iouLowerBound:
-                        outClass[xVoxel, yVoxel, i] = -1
+                        # assumes all anchors start as 'neg'
+                        outClass[xVoxel, yVoxel, i] = 0
+                    else:
+                        outClass[xVoxel, yVoxel, i] = 1
                     if iou > outClassCheck[xVoxel, yVoxel, i]:
                         # TODO put the update to the regression mapping here (I think)
                         outClassCheck[xVoxel, yVoxel, i] = iou
