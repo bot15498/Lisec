@@ -56,8 +56,8 @@ catToNum = {
 
 # # load dataset
 level5Data = LyftDataset(
-    data_path='C:\\Users\\pmwws\\Documents\\ML project\\3d-object-detection-for-autonomous-vehicles',
-    json_path='C:\\Users\\pmwws\\Documents\\ML project\\3d-object-detection-for-autonomous-vehicles\\train_data',
+    data_path='E:\\CS539 Machine Learning\\3d-object-detection-for-autonomous-vehicles',
+    json_path='E:\\CS539 Machine Learning\\3d-object-detection-for-autonomous-vehicles\\train_data',
     verbose=True
 )
 
@@ -125,6 +125,7 @@ def combine_lidar_data(sample, dataDir):
     allPoints = np.concatenate(allPoints)
 
     return allPoints
+
 
 
 # given a x,y,z, find coordinate of voxel it woul be in.
@@ -253,12 +254,11 @@ def createModel(nx, ny, nz, maxPoints):
     inputShape = (nz, nx, ny, maxPoints, 6)
     inLayer = Input(shape=inputShape, name='InputVoxel')
     outLayer = addVFELayer(inLayer, 6, 32)
-    # outLayer = addVFELayer(outLayer, 32, 128)
-    outLayer = addVFELayer(outLayer, 32, 64)
-    outLayer = addFCN(outLayer, 64, 64)
+    outLayer = addVFELayer(outLayer, 32, 128)
+    outLayer = addFCN(outLayer, 128, 128)
     # Convolution layers. Just use default convolution algorithm.
     outLayer = MaxPoolingVFELayer(combine=True)(outLayer)
-    outLayer = addConv3DLayer(outLayer, 64, 64, 3, (2, 1, 1), (1, 1, 1))
+    outLayer = addConv3DLayer(outLayer, 128, 64, 3, (2, 1, 1), (1, 1, 1))
     outLayer = addConv3DLayer(outLayer, 64, 64, 3, (1, 1, 1), (0, 1, 1))
     outLayer = addConv3DLayer(outLayer, 64, 64, 3, (2, 1, 1), (1, 1, 1))
     # RPN layer time
@@ -386,7 +386,7 @@ def preprocessLabels(data):
 
 def main2(sample):
     # Set constants
-    dataDir = 'C:\\Users\\pmwws\\Documents\\ML project\\3d-object-detection-for-autonomous-vehicles'
+    dataDir = 'E:\\CS539 Machine Learning\\3d-object-detection-for-autonomous-vehicles'
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
     # pre-process data
@@ -420,18 +420,17 @@ def main2(sample):
     outRegress = np.reshape(outRegress, (1,) + outRegress.shape)
 
     # create model
-    with tf.device('/device:CPU:0'):
-        # model = createModel(nx, ny, nz, maxPoints)
-        # plot_model(model, show_shapes=True)
-        # sgd = optimizers.SGD(lr=0.01, decay=1e-6, momentum=0.9, nesterov=True)
-        # model.compile(optimizers=sgd, loss=['mse', 'mse'])
-        model =load_model('models\\Epoch5.h5', custom_objects={'RepeatLayer' : RepeatLayer, 'MaxPoolingVFELayer' : MaxPoolingVFELayer})
+    model = createModel(nx, ny, nz, maxPoints)
+    # plot_model(model, show_shapes=True)
+    sgd = optimizers.SGD(lr=0.01, decay=1e-6, momentum=0.9, nesterov=True)
+    model.compile(optimizers=sgd, loss=['mse', 'mse'])
+    # model =load_model('models\\Epoch5.h5', custom_objects={'RepeatLayer' : RepeatLayer, 'MaxPoolingVFELayer' : MaxPoolingVFELayer})
 
-        # fit model
-        history = model.fit(x=testVFEPointsDense, y=[outClass, outRegress], batch_size=1, verbose=1, epochs=1)
+    # fit model
+    history = model.fit(x=testVFEPointsDense, y=[outClass, outRegress], batch_size=1, verbose=1, epochs=1)
 
-        print(history.history)
-        model.save('models\\Epoch6.h5')
+    print(history.history)
+    # model.save('models\\Epoch6.h5')
 
 
 if __name__ == '__main__':

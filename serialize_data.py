@@ -225,7 +225,23 @@ def preprocessLabels(data):
 	return [outClass, outRegress]
 
 
+def rpnToImage(classData, regressData):
+	'''
+	Converts output of neural net into bounding boxes.
+	:param classData:
+	:param regressData:
+	:return:
+	'''
+	pass
+
+
 def saveLabelsForSample(samples, outPath):
+	'''
+	Converts Lidar data from a sample into rpn form. Saves it as a npy file
+	:param samples:
+	:param outPath:
+	:return:
+	'''
 	classMap = []
 	regressMap = []
 	for sample in samples:
@@ -283,4 +299,5 @@ if __name__ == '__main__':
 	)
 	scene = level5Data.scene[0]
 	sample = level5Data.get('sample', scene['first_sample_token'])
+	sample2 = level5Data.get('sample',sample['next'])
 	saveLabelsForSample([sample], 'labels')
