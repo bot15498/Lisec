@@ -1,5 +1,5 @@
 from lyft_dataset_sdk.lyftdataset import LyftDataset
-from tensorflow.keras.models import Model
+from tensorflow.keras.models import Model, load_model
 from tensorflow.keras.layers import Dense, Input, BatchNormalization, Layer, Concatenate, Conv3D, ZeroPadding3D, \
     Reshape, Permute, ZeroPadding2D, Conv2D, Conv2DTranspose
 from tensorflow.keras.utils import plot_model
@@ -56,8 +56,8 @@ catToNum = {
 
 # # load dataset
 level5Data = LyftDataset(
-    data_path='C:\\Users\\pmwws\\Documents\\ML project\\3d-object-detection-for-autonomous-vehicles',
-    json_path='C:\\Users\\pmwws\\Documents\\ML project\\3d-object-detection-for-autonomous-vehicles\\train_data',
+    data_path='E:\\CS539 Machine Learning\\3d-object-detection-for-autonomous-vehicles',
+    json_path='E:\\CS539 Machine Learning\\3d-object-detection-for-autonomous-vehicles\\train_data',
     verbose=True
 )
 
@@ -74,6 +74,7 @@ class RepeatLayer(Layer):
         return tf_backend.repeat_elements(inputs, maxPoints, pointIndex)
 
 
+
 # special pooling layer for VFE block
 class MaxPoolingVFELayer(Layer):
     def __init__(self, combine=False, **kwargs):
@@ -88,6 +89,11 @@ class MaxPoolingVFELayer(Layer):
 
     def call(self, inputs, **kwargs):
         return tf_backend.max(inputs, axis=pointIndex, keepdims=not self.combineDim)
+
+    def get_config(self):
+        baseConfig = super(MaxPoolingVFELayer, self).get_config()
+        baseConfig['combine'] = self.combineDim
+        return baseConfig
 
 
 # Uses quaternions to rotate all points in a scene to match the location of the lidar sensor on the car.
@@ -119,6 +125,7 @@ def combine_lidar_data(sample, dataDir):
     allPoints = np.concatenate(allPoints)
 
     return allPoints
+
 
 
 # given a x,y,z, find coordinate of voxel it woul be in.
@@ -346,7 +353,7 @@ def preprocessLabels(data):
     bestIouForBox = np.zeros(len(data))
 
     # scale back l and w because we cut the size of the feature space by 2 through our network
-    fixedData = data * fixBoxScaling((1, 2), outX, outY, nx, ny)
+    fixedData = data * fixBoxScaling(data.shape, outX, outY, nx, ny)
 
     # Iterate through anchors and bounding boxes in fixedData and update outRegress and outClass as necessary based on IoU
     centerZ = -0.5  # hard set z center of anchors to -.05 dude just trust me.
@@ -390,7 +397,7 @@ def preprocessLabels(data):
 
 def main2(sample):
     # Set constants
-    dataDir = 'C:\\Users\\pmwws\\Documents\\ML project\\3d-object-detection-for-autonomous-vehicles'
+    dataDir = 'E:\\CS539 Machine Learning\\3d-object-detection-for-autonomous-vehicles'
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
     # pre-process data
@@ -401,6 +408,9 @@ def main2(sample):
     endTime = time.time()
     print(endTime - startTime)
     print(testVFEPoints.shape)
+    # Turn into 6 rank tensor, then convert it to dense because keras is stupid
+    testVFEPoints = sparse.reshape(testVFEPoints, (1,) + testVFEPoints.shape)
+    testVFEPointsDense = sparse.to_dense(testVFEPoints, default_value=0., validate_indices=False)
 
     # pre-process labels
     labels = []
@@ -419,18 +429,24 @@ def main2(sample):
     # for right now, only care about cars
 
     outClass, outRegress = preprocessLabels(labels)
+    outClass = np.reshape(outClass, (1,) + outClass.shape)
+    outRegress = np.reshape(outRegress, (1,) + outRegress.shape)
 
     # create model
     model = createModel(nx, ny, nz, maxPoints)
-    plot_model(model, show_shapes=True)
+    # plot_model(model, show_shapes=True)
     sgd = optimizers.SGD(lr=0.01, decay=1e-6, momentum=0.9, nesterov=True)
     model.compile(optimizers=sgd, loss=['mse', 'mse'])
+    # model =load_model('models\\Epoch5.h5', custom_objects={'RepeatLayer' : RepeatLayer, 'MaxPoolingVFELayer' : MaxPoolingVFELayer})
 
     # fit model
-    model.fit(x=testVFEPoints, y=[outClass, outRegress], batch_size=1, verbose=1, epochs=1)
+    history = model.fit(x=testVFEPointsDense, y=[outClass, outRegress], batch_size=1, verbose=1, epochs=1)
+
+    print(history.history)
+    # model.save('models\\Epoch6.h5')
+
 
 if __name__ == '__main__':
-    # main()
     scene = level5Data.scene[0]
     sample = level5Data.get('sample', scene['first_sample_token'])
     main2(sample)
