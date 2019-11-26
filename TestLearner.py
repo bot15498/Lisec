@@ -1,3 +1,5 @@
+import matplotlib
+matplotlib.use('agg')
 from lyft_dataset_sdk.lyftdataset import LyftDataset
 from tensorflow.keras.models import Model, load_model
 from tensorflow.keras.layers import Dense, Input, BatchNormalization, Layer, Concatenate, Conv3D, ZeroPadding3D, \
@@ -205,7 +207,7 @@ def addDenseLayer(layer, units, act=None):
 	combineVoxel = np.prod(np.array(layer.shape[1:-2]))
 	shape = (combineVoxel,) + pointShape
 	layer = Reshape(shape)(layer)
-	layer = Dense(units, input_shape=(layer.shape[1:]), activation=act)(layer)
+	layer = Dense(units, input_shape=(layer.shape[1:]), activation=act, use_bias=False)(layer)
 	layer = Reshape(oldShape[:-1] + (units,))(layer)
 	return layer
 
@@ -280,31 +282,36 @@ def createModel(nx, ny, nz, maxPoints):
 	return model
 
 
-def main2(sample):
+def main2(samples):
 	# Set constants
 	dataDir = 'E:\\CS539 Machine Learning\\3d-object-detection-for-autonomous-vehicles'
 	labelsDir = 'labels'
 	os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
-	# pre-process data
-	import time
-	testSampleLidarPoints = combine_lidar_data(sample, dataDir)
-	startTime = time.time()
-	testVFEPoints = VFE_preprocessing(testSampleLidarPoints, voxelx, voxely, voxelz, maxPoints, nx // 2, ny // 2, nz)
-	endTime = time.time()
-	print(endTime - startTime)
-	print(testVFEPoints.shape)
-	# Turn into 6 rank tensor, then convert it to dense because keras is stupid
-	testVFEPoints = sparse.reshape(testVFEPoints, (1,) + testVFEPoints.shape)
-	testVFEPointsDense = sparse.to_dense(testVFEPoints, default_value=0., validate_indices=False)
+	points = []
+	for sample in samples:
+		# pre-process data
+		import time
+		sampleLidarPoints = combine_lidar_data(sample, dataDir)
+		startTime = time.time()
+		trainVFEPoints = VFE_preprocessing(sampleLidarPoints, voxelx, voxely, voxelz, maxPoints, nx // 2, ny // 2, nz)
+		testVFEPointsDense = sparse.to_dense(trainVFEPoints, default_value=0., validate_indices=False)
+		points.append(testVFEPointsDense)
+		endTime = time.time()
+		print(endTime - startTime)
+		print(trainVFEPoints.shape)
+		# Turn into 6 rank tensor, then convert it to dense because keras is stupid
+		# testVFEPoints = sparse.reshape(testVFEPoints, (1,) + testVFEPoints.shape)
+		# testVFEPointsDense = sparse.to_dense(testVFEPoints, default_value=0., validate_indices=False)
+	trainPoints = tf.stack(points, axis=0)
 
 	# get labels from file
-	outClass = np.fromfile(labelsDir + '\\labelsClass.npy')
-	outRegress = np.fromfile(labelsDir + '\\regressClass.npy')
-	classShape = np.fromfile(labelsDir + '\\labelsShape.npy')
-	regressShape = np.fromfile(labelsDir + '\\regressShape.npy')
-	outClass = outClass.reshape((tuple(classShape)))
-	outRegress = outClass.reshape((tuple(regressShape)))
+	outClass = np.load(labelsDir + '\\labelsClass.npy')
+	outRegress = np.load(labelsDir + '\\regressClass.npy')
+	classShape = np.load(labelsDir + '\\labelsShape.npy')
+	regressShape = np.load(labelsDir + '\\regressShape.npy')
+	# outClass = outClass.reshape((tuple(classShape)))
+	# outRegress = outRegress.reshape((tuple(regressShape)))
 
 	# create model
 	model = createModel(nx, ny, nz, maxPoints)
@@ -314,15 +321,14 @@ def main2(sample):
 	# model =load_model('models\\Epoch5.h5', custom_objects={'RepeatLayer' : RepeatLayer, 'MaxPoolingVFELayer' : MaxPoolingVFELayer})
 
 	# fit model
-	history = model.fit(x=testVFEPointsDense, y=[outClass, outRegress], batch_size=1, verbose=1, epochs=1)
+	history = model.fit(x=trainPoints, y=[outClass, outRegress], batch_size=1, verbose=1, epochs=1)
 
 	print(history.history)
-
-
-# model.save('models\\Epoch6.h5')
+	# model.save('models\\Epoch6.h5')
 
 
 if __name__ == '__main__':
 	scene = level5Data.scene[0]
 	sample = level5Data.get('sample', scene['first_sample_token'])
-	main2(sample)
+	sample2 = level5Data.get('sample', sample['next'])
+	main2([sample, sample2])

@@ -1,3 +1,5 @@
+import matplotlib
+matplotlib.use('agg')
 from lyft_dataset_sdk.lyftdataset import LyftDataset
 import os
 from tensorflow import SparseTensor, sparse
@@ -353,9 +355,10 @@ def imageToRPN(sample):
 		row += [quaternion.yaw_pitch_roll[0]]
 		instance = level5Data.get('instance', ann['instance_token'])
 		category = level5Data.get('category', instance['category_token'])['name']
-		row += [catToNum[category]]
-		# TODO remove everything but cars from labels.
-		labels.append(row)
+		# row += [catToNum[category]]
+		# Only adds cars
+		if catToNum[category] == 0:
+			labels.append(row)
 	labels = np.array(labels)
 	# for right now, only care about cars
 
