@@ -1,4 +1,5 @@
 import matplotlib
+
 matplotlib.use('agg')
 from lyft_dataset_sdk.lyftdataset import LyftDataset
 import os
@@ -10,6 +11,8 @@ import math
 import tensorflow as tf
 from shapely.geometry import Polygon
 import random
+import threading
+from operator import itemgetter
 
 # constants
 # size of voxel
@@ -366,6 +369,21 @@ def imageToRPN(sample):
 	return outClass, outRegress
 
 
+classMap = []
+regressMap = []
+
+
+def imageToRPNWrapper(i, sample, lock):
+	global classMap
+	global regressMap
+	outClass, outRegress = imageToRPN(sample)
+	lock.acquire()
+	classMap.append([i, outClass])
+	regressMap.append([i, outRegress])
+	print('sample ' + str(i) + ' finished')
+	lock.release()
+
+
 def saveLabelsForSample(samples, outPath):
 	'''
 	Converts Lidar data from a sample into rpn form. Saves it as a npy file
@@ -373,13 +391,22 @@ def saveLabelsForSample(samples, outPath):
 	:param outPath:
 	:return:
 	'''
+	global classMap
+	global regressMap
+	lock = threading.Lock()
 
-	classMap = []
-	regressMap = []
-	for sample in samples:
-		outClass, outRegress = imageToRPN(sample)
-		classMap.append(outClass)
-		regressMap.append(outRegress)
+	# for sample in samples:
+	threads = []
+	for i in range(len(samples)):
+		t = threading.Thread(target=imageToRPNWrapper, args=(i, samples[i], lock))
+		threads.append(t)
+		t.start()
+	for t in threads:
+		t.join()
+	# now sort
+	classMap = sorted(classMap, key=itemgetter(0))
+	regressMap = sorted(regressMap, key=itemgetter(0))
+
 	classMap = np.stack(classMap)
 	regressMap = np.stack(regressMap)
 

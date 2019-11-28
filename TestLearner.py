@@ -108,7 +108,13 @@ def rotate_points(points, rotation, inverse=False):
 # Takes the sample dict and returns an array of n,3 with every point in the sample.
 def combine_lidar_data(sample, dataDir):
 	sensorTypes = ['LIDAR_TOP', 'LIDAR_FRONT_RIGHT', 'LIDAR_FRONT_LEFT']
-	sensorFrameMetadata = [level5Data.get('sample_data', sample['data'][x]) for x in sensorTypes]
+	# Account for not all samples having all liar data for some reason
+	actualSensorTypes = []
+	for sensorType in sensorTypes:
+		if sensorType in sample['data']:
+			actualSensorTypes.append(sensorType)
+
+	sensorFrameMetadata = [level5Data.get('sample_data', sample['data'][x]) for x in actualSensorTypes]
 	allPoints = []
 	for sensorFrame in sensorFrameMetadata:
 		sensor = level5Data.get('calibrated_sensor', sensorFrame['calibrated_sensor_token'])
@@ -189,7 +195,10 @@ def addVFELayer(layer, startNum, endNum):
 	# now do the max pooling per
 	pooling = MaxPoolingVFELayer()(layer)
 	pooling = RepeatLayer()(pooling)
-	out = Concatenate()([pooling, layer])
+	# Copy the layer list to prevent error cycle in concat.
+	# https://github.com/tensorflow/tensorflow/issues/30355
+	concatLayers = [pooling, layer]
+	out = Concatenate()(concatLayers[:])
 	return out
 
 
@@ -276,8 +285,8 @@ def createModel(nx, ny, nz, maxPoints):
 	rpnConv = addRPNConvLayer(rpnConv, 128, 256, 5)
 	rpnConv3Out = Conv2DTranspose(256, strides=4, kernel_size=4, padding='same')(rpnConv)
 	outLayer = Concatenate()([rpnConv1Out, rpnConv2Out, rpnConv3Out])
-	probabilityLayer = Conv2D(2, kernel_size=1, strides=1, padding='same')(outLayer)
-	regressionMap = Conv2D(14, kernel_size=1, strides=1, padding='same')(outLayer)
+	probabilityLayer = Conv2D(2, kernel_size=1, strides=1, padding='same', name='Classification Layer')(outLayer)
+	regressionMap = Conv2D(14, kernel_size=1, strides=1, padding='same', name='Regression Layer')(outLayer)
 	model = Model(inputs=inLayer, outputs=[probabilityLayer, regressionMap])
 	return model
 
@@ -332,3 +341,7 @@ if __name__ == '__main__':
 	sample = level5Data.get('sample', scene['first_sample_token'])
 	sample2 = level5Data.get('sample', sample['next'])
 	main2([sample, sample2])
+	# samples = []
+	# for scene in level5Data.scene:
+	# 	samples.append(level5Data.get('sample', scene['first_sample_token']))
+	# main2(samples[:])
