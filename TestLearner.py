@@ -3,7 +3,7 @@ matplotlib.use('agg')
 from lyft_dataset_sdk.lyftdataset import LyftDataset
 from tensorflow.keras.models import Model, load_model
 from tensorflow.keras.layers import Dense, Input, BatchNormalization, Layer, Concatenate, Conv3D, ZeroPadding3D, \
-	Reshape, Permute, ZeroPadding2D, Conv2D, Conv2DTranspose
+	Reshape, Permute, ZeroPadding2D, Conv2D, Conv2DTranspose, Activation
 from tensorflow.keras.utils import plot_model
 import tensorflow.keras.backend as tf_backend
 import tensorflow as tf
@@ -205,7 +205,8 @@ def addVFELayer(layer, startNum, endNum):
 def addFCN(layer, startNum, endNum):
 	layer = addDenseLayer(layer, endNum)
 	layer = BatchNormalization()(layer)
-	layer = addDenseLayer(layer, endNum, 'relu')
+	# layer = addDenseLayer(layer, endNum, 'relu')
+	layer = Activation('relu')(layer)
 	return layer
 
 
