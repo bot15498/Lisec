@@ -216,6 +216,7 @@ def preprocessLabels(data):
 	centerZ = -0.5  # hard set z center of anchors to -.05 dude just trust me.
 	for i in range(len(anchors)):
 		for xVoxel in range(outX):
+			print(xVoxel)
 			# Do calculations in terms of cm now.
 			centerX = voxelXSize * xVoxel + (voxelXSize / 2)
 			if centerX - (anchors[i][0] / 2) < 0 or centerX + (anchors[i][0] / 2) > voxelXSize * outX:
@@ -278,6 +279,7 @@ def preprocessLabels(data):
 					outValidBox[xVoxel, yVoxel, i] = 0
 					outRpnOverlap[xVoxel, yVoxel, i] = 0
 				elif boxType == 'pos':
+					print('pos at', xVoxel, yVoxel, i)
 					outValidBox[xVoxel, yVoxel, i] = 1
 					outRpnOverlap[xVoxel, yVoxel, i] = 1
 					# save into first 7 values if anchor 0, save into next  values if anchor 1, and so on.
@@ -376,8 +378,10 @@ def saveLabelsForSample(samples, outPath):
 
 	classMap = []
 	regressMap = []
-	for sample in samples:
-		outClass, outRegress = imageToRPN(sample)
+	for i in range(len(samples)):
+		print('doing sample',str(i))
+		outClass, outRegress = imageToRPN(samples[i])
+		print('sample ' + str(i) + ' finished')
 		classMap.append(outClass)
 		regressMap.append(outRegress)
 	classMap = np.stack(classMap)
@@ -427,4 +431,4 @@ if __name__ == '__main__':
 	samples = []
 	for scene in level5Data.scene:
 		samples.append(level5Data.get('sample', scene['first_sample_token']))
-	saveLabelsForSample(samples, 'labels')
+	saveLabelsForSample(samples, 'C:\\Users\\snkim\\Desktop\\poject\\labels_first_sample_of_all_Scenes')

@@ -18,6 +18,10 @@ from tensorflow import SparseTensor, sparse
 import math
 from shapely.geometry import Polygon
 
+from tensorflow.python.framework.ops import disable_eager_execution
+#disable_eager_execution()
+print(tf.executing_eagerly())
+
 # constants
 # size of voxel
 voxelx = 0.5
@@ -58,8 +62,8 @@ catToNum = {
 
 # # load dataset
 level5Data = LyftDataset(
-	data_path='E:\\CS539 Machine Learning\\3d-object-detection-for-autonomous-vehicles',
-	json_path='E:\\CS539 Machine Learning\\3d-object-detection-for-autonomous-vehicles\\train_data',
+	data_path='C:\\Users\\snkim\\Desktop\\poject\\data',
+	json_path='C:\\Users\\snkim\\Desktop\\poject\\data\\train_data',
 	verbose=True
 )
 
@@ -205,7 +209,7 @@ def addVFELayer(layer, startNum, endNum):
 def addFCN(layer, startNum, endNum):
 	layer = addDenseLayer(layer, endNum)
 	layer = BatchNormalization()(layer)
-	# layer = addDenseLayer(layer, endNum, 'relu')
+	#layer = addDenseLayer(layer, endNum, 'relu')
 	layer = Activation('relu')(layer)
 	return layer
 
@@ -264,11 +268,11 @@ def createModel(nx, ny, nz, maxPoints):
 	inputShape = (nz, nx, ny, maxPoints, 6)
 	inLayer = Input(shape=inputShape, name='InputVoxel')
 	outLayer = addVFELayer(inLayer, 6, 32)
-	outLayer = addVFELayer(outLayer, 32, 128)
-	outLayer = addFCN(outLayer, 128, 128)
+	outLayer = addVFELayer(outLayer, 32, 64)
+	outLayer = addFCN(outLayer, 64, 64)
 	# Convolution layers. Just use default convolution algorithm.
 	outLayer = MaxPoolingVFELayer(combine=True)(outLayer)
-	outLayer = addConv3DLayer(outLayer, 128, 64, 3, (2, 1, 1), (1, 1, 1))
+	outLayer = addConv3DLayer(outLayer, 64, 64, 3, (2, 1, 1), (1, 1, 1))
 	outLayer = addConv3DLayer(outLayer, 64, 64, 3, (1, 1, 1), (0, 1, 1))
 	outLayer = addConv3DLayer(outLayer, 64, 64, 3, (2, 1, 1), (1, 1, 1))
 	# RPN layer time
@@ -286,63 +290,71 @@ def createModel(nx, ny, nz, maxPoints):
 	rpnConv = addRPNConvLayer(rpnConv, 128, 256, 5)
 	rpnConv3Out = Conv2DTranspose(256, strides=4, kernel_size=4, padding='same')(rpnConv)
 	outLayer = Concatenate()([rpnConv1Out, rpnConv2Out, rpnConv3Out])
-	probabilityLayer = Conv2D(2, kernel_size=1, strides=1, padding='same', name='Classification Layer')(outLayer)
-	regressionMap = Conv2D(14, kernel_size=1, strides=1, padding='same', name='Regression Layer')(outLayer)
+	probabilityLayer = Conv2D(2, kernel_size=1, strides=1, padding='same', name='ClassificationLayer')(outLayer)
+	regressionMap = Conv2D(14, kernel_size=1, strides=1, padding='same', name='RegressionLayer')(outLayer)
 	model = Model(inputs=inLayer, outputs=[probabilityLayer, regressionMap])
 	return model
 
 
 def main2(samples):
+	import time
 	# Set constants
-	dataDir = 'E:\\CS539 Machine Learning\\3d-object-detection-for-autonomous-vehicles'
-	labelsDir = 'labels'
-	os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+	dataDir = 'C:\\Users\\snkim\\Desktop\\poject\\data'
+	labelsDir = 'C:\\Users\\snkim\\Desktop\\poject\\labels_first_sample_threading'
+	#os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 	points = []
-	for sample in samples:
+	#for sample in samples:
+	for i in range(len(samples)):
 		# pre-process data
-		import time
-		sampleLidarPoints = combine_lidar_data(sample, dataDir)
+		sampleLidarPoints = combine_lidar_data(samples[i], dataDir)
 		startTime = time.time()
 		trainVFEPoints = VFE_preprocessing(sampleLidarPoints, voxelx, voxely, voxelz, maxPoints, nx // 2, ny // 2, nz)
 		testVFEPointsDense = sparse.to_dense(trainVFEPoints, default_value=0., validate_indices=False)
 		points.append(testVFEPointsDense)
 		endTime = time.time()
 		print(endTime - startTime)
-		print(trainVFEPoints.shape)
+		print('finished ' + str(i))
 		# Turn into 6 rank tensor, then convert it to dense because keras is stupid
 		# testVFEPoints = sparse.reshape(testVFEPoints, (1,) + testVFEPoints.shape)
 		# testVFEPointsDense = sparse.to_dense(testVFEPoints, default_value=0., validate_indices=False)
 	trainPoints = tf.stack(points, axis=0)
 
-	# get labels from file
-	outClass = np.load(labelsDir + '\\labelsClass.npy')
-	outRegress = np.load(labelsDir + '\\regressClass.npy')
-	classShape = np.load(labelsDir + '\\labelsShape.npy')
-	regressShape = np.load(labelsDir + '\\regressShape.npy')
+	print('loading labels')
+	# get labels from file 
+	outClass = np.load(labelsDir + '\\labelsClass.npy', allow_pickle=True)
+	outRegress = np.load(labelsDir + '\\regressClass.npy', allow_pickle=True)
+	classShape = np.load(labelsDir + '\\labelsShape.npy', allow_pickle=True)
+	regressShape = np.load(labelsDir + '\\regressShape.npy', allow_pickle=True)
 	# outClass = outClass.reshape((tuple(classShape)))
 	# outRegress = outRegress.reshape((tuple(regressShape)))
+	
+	# I fucked up the serialize data. It's saved as [id, array object we want]
+	outClass = np.stack(outClass[:,1])
+	outRegress = np.stack(outRegress[:,1])
 
 	# create model
 	model = createModel(nx, ny, nz, maxPoints)
 	# plot_model(model, show_shapes=True)
 	sgd = optimizers.SGD(lr=0.01, decay=1e-6, momentum=0.9, nesterov=True)
-	model.compile(optimizers=sgd, loss=['mse', 'mse'])
+	model.compile(optimizer=sgd, loss=['mse', 'mse'])
+	#model.summary()
 	# model =load_model('models\\Epoch5.h5', custom_objects={'RepeatLayer' : RepeatLayer, 'MaxPoolingVFELayer' : MaxPoolingVFELayer})
 
 	# fit model
-	history = model.fit(x=trainPoints, y=[outClass, outRegress], batch_size=1, verbose=1, epochs=1)
+	history = model.fit(x=trainPoints, y=[outClass, outRegress], batch_size=1, verbose=1, epochs=1, steps_per_epoch=180)
 
 	print(history.history)
-	# model.save('models\\Epoch6.h5')
+	model.save('C:\\Users\\snkim\\Desktop\\poject\\models\\180SampleEpoch0.h5')
 
 
 if __name__ == '__main__':
-	scene = level5Data.scene[0]
-	sample = level5Data.get('sample', scene['first_sample_token'])
-	sample2 = level5Data.get('sample', sample['next'])
-	main2([sample, sample2])
-	# samples = []
-	# for scene in level5Data.scene:
-	# 	samples.append(level5Data.get('sample', scene['first_sample_token']))
-	# main2(samples[:])
+	#scene = level5Data.scene[0]
+	#sample = level5Data.get('sample', scene['first_sample_token'])
+	#sample2 = level5Data.get('sample', sample['next'])
+	#main2([sample, sample2])
+	samples = []
+	for scene in level5Data.scene:
+		samples.append(level5Data.get('sample', scene['first_sample_token']))
+	print('Training on ' + str(len(samples)))
+	main2(samples[:])

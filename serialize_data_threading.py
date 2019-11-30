@@ -13,6 +13,7 @@ from shapely.geometry import Polygon
 import random
 import threading
 from operator import itemgetter
+import sys
 
 # constants
 # size of voxel
@@ -49,7 +50,7 @@ catToNum = {
 	'bicycle': 8
 }
 
-dataDir = 'E:\\CS539 Machine Learning\\3d-object-detection-for-autonomous-vehicles'
+dataDir = 'C:\\Users\\snkim\\Desktop\\poject\\data'
 
 
 # Uses quaternions to rotate all points in a scene to match the location of the lidar sensor on the car.
@@ -376,11 +377,34 @@ regressMap = []
 def imageToRPNWrapper(i, sample, lock):
 	global classMap
 	global regressMap
+	print('start ' + str(i))
 	outClass, outRegress = imageToRPN(sample)
 	lock.acquire()
 	classMap.append([i, outClass])
 	regressMap.append([i, outRegress])
 	print('sample ' + str(i) + ' finished')
+	lock.release()
+	
+def imageToRPNWrapper2(samples, lock):
+	global classMap
+	global regressMap
+	tempClass = []
+	tempRegress = []
+	vals = []
+	for sample in samples:
+		vals.append(sample[0])
+		lock.acquire()
+		print('start ' + str(sample[0]))
+		lock.release()
+		outClass, outRegress = imageToRPN(sample[1])
+		tempClass.append([sample[0], outClass])
+		tempRegress.append([sample[0], outRegress])
+	lock.acquire()
+	for c in tempClass:
+		classMap.append([c[0], c[1]])
+	for c in tempRegress:
+		regressMap.append([c[0], c[1]])
+	print('samples ' + ','.join([str(i) for i in vals]))
 	lock.release()
 
 
@@ -397,15 +421,33 @@ def saveLabelsForSample(samples, outPath):
 
 	# for sample in samples:
 	threads = []
-	for i in range(len(samples)):
-		t = threading.Thread(target=imageToRPNWrapper, args=(i, samples[i], lock))
+	#for i in range(len(samples)):
+	#	t = threading.Thread(target=imageToRPNWrapper, args=(i, samples[i], lock))
+	#	threads.append(t)
+	#	t.start()
+	header = int(len(samples) / 30)
+	if len(samples) % 30 != 0:
+		print(header)
+		sys.exit()
+		
+	keys = list(range(len(samples)))
+	keyedSamples = list(zip(keys, samples))
+	for i in range(30):
+		tempSamples = keyedSamples[i*header:i*header + header]
+		t = threading.Thread(target=imageToRPNWrapper2, args=(tempSamples, lock))
 		threads.append(t)
+	print('created all threads')
+	for t in threads:
 		t.start()
+	print('awaiting all threads')
 	for t in threads:
 		t.join()
 	# now sort
 	classMap = sorted(classMap, key=itemgetter(0))
 	regressMap = sorted(regressMap, key=itemgetter(0))
+	
+	classMap = [x[1] for x in classMap]
+	regressMap = [x[1] for x in regressMap]
 
 	classMap = np.stack(classMap)
 	regressMap = np.stack(regressMap)
@@ -447,11 +489,11 @@ if __name__ == '__main__':
 		json_path=dataDir + '\\train_data',
 		verbose=True
 	)
-	# scene = level5Data.scene[0]
-	# sample = level5Data.get('sample', scene['first_sample_token'])
-	# sample2 = level5Data.get('sample', sample['next'])
+	#scene = level5Data.scene[0]
+	#sample = level5Data.get('sample', scene['first_sample_token'])
+	#sample2 = level5Data.get('sample', sample['next'])
 	# saveLabelsForSample([sample, sample2], 'labels')
 	samples = []
 	for scene in level5Data.scene:
 		samples.append(level5Data.get('sample', scene['first_sample_token']))
-	saveLabelsForSample(samples, 'labels')
+	saveLabelsForSample(samples, 'C:\\Users\\snkim\\Desktop\\poject\\labels_first_sample_threading')
