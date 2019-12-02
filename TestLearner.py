@@ -62,8 +62,8 @@ catToNum = {
 
 # # load dataset
 level5Data = LyftDataset(
-	data_path='C:\\Users\\snkim\\Desktop\\poject\\data',
-	json_path='C:\\Users\\snkim\\Desktop\\poject\\data\\train_data',
+	data_path='E:\\CS539 Machine Learning\\3d-object-detection-for-autonomous-vehicles',
+	json_path='E:\\CS539 Machine Learning\\3d-object-detection-for-autonomous-vehicles\\train_data',
 	verbose=True
 )
 
@@ -126,7 +126,8 @@ def combine_lidar_data(sample, dataDir):
 		filePath = sensorFrame['filename'].replace('/', '\\')
 		rawPoints = np.fromfile(os.path.join(dataDir, filePath), dtype=np.float32)
 
-		# reshape to get each point (5 values, then drop last 2 since they are intensiy and always 1?)
+
+		# need to translate points to correct place.
 		rawPoints = rawPoints.reshape(-1, 5)[:, :3]
 
 		# need to rotate points per sensor, then translate to position of sensor before combining
@@ -157,7 +158,7 @@ def VFE_preprocessing(points, xSize, ySize, zSize, sampleSize, maxVoxelX, maxVox
 		key = get_voxel(point, xSize, ySize, zSize)
 		if -maxVoxelX < key[0] and key[0] < maxVoxelX \
 				and -maxVoxelY < key[1] and key[1] < maxVoxelY \
-				and 0 < key[2] and key[2] < maxVoxelZ:
+				and 0< key[2] and key[2] < maxVoxelZ:
 			# remove negatives.
 			fixedKey = (key[0] + maxVoxelX, key[1] + maxVoxelY, key[2])
 			if fixedKey in clusteredPoints:
@@ -242,7 +243,8 @@ def addConv2DLayer(layer, cin, cout, k, s, p):
 	layer = ZeroPadding2D(padding=p)(layer)
 	layer = Conv2D(cout, kernel_size=k, strides=s)(layer)
 	layer = BatchNormalization()(layer)
-	layer = addDenseLayer(layer, layer.shape[-1], 'relu')
+	# layer = addDenseLayer(layer, layer.shape[-1], 'relu')
+	layer = Activation('relu')(layer)
 	return layer
 
 
@@ -296,10 +298,18 @@ def createModel(nx, ny, nz, maxPoints):
 	return model
 
 
+# TODO write custom loss instead of just doing mse
+def customLoss(alpha=0.5, beta=0.5):
+	def combinedLoss(y_true, y_pred):
+		y_class, y_regress = y_pred
+
+	return combinedLoss
+
+
 def main2(samples):
 	import time
 	# Set constants
-	dataDir = 'C:\\Users\\snkim\\Desktop\\poject\\data'
+	dataDir = 'E:\\CS539 Machine Learning\\3d-object-detection-for-autonomous-vehicles'
 	labelsDir = 'C:\\Users\\snkim\\Desktop\\poject\\labels_first_sample_threading'
 	#os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
@@ -328,10 +338,6 @@ def main2(samples):
 	regressShape = np.load(labelsDir + '\\regressShape.npy', allow_pickle=True)
 	# outClass = outClass.reshape((tuple(classShape)))
 	# outRegress = outRegress.reshape((tuple(regressShape)))
-	
-	# I fucked up the serialize data. It's saved as [id, array object we want]
-	outClass = np.stack(outClass[:,1])
-	outRegress = np.stack(outRegress[:,1])
 
 	# create model
 	model = createModel(nx, ny, nz, maxPoints)

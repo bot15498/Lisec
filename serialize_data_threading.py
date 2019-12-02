@@ -30,7 +30,7 @@ nz = int(2 / voxelz)
 maxPoints = 35
 
 # number of anchors
-anchors = [[1.6, 3.9, 1.56, 0], [3.9, 1.6, 1.56, 0]]
+anchors = [[1.6, 3.9, 1.56, 0], [1.6, 3.9, 1.56, math.pi / 2]]
 iouLowerBound = 0.45
 iouUpperBound = 0.6
 
@@ -50,7 +50,7 @@ catToNum = {
 	'bicycle': 8
 }
 
-dataDir = 'C:\\Users\\snkim\\Desktop\\poject\\data'
+dataDir = 'E:\\CS539 Machine Learning\\3d-object-detection-for-autonomous-vehicles'
 
 
 # Uses quaternions to rotate all points in a scene to match the location of the lidar sensor on the car.
@@ -184,6 +184,8 @@ def calculateIoU(box1, box2):
 def fixBoxScaling(dataSize, newX, newY, origX, origY):
 	out = np.ones(dataSize)
 	out = out.transpose()
+	out[0] = [newX / origX for i in range(len(out[0]))]
+	out[1] = [newY / origY for i in range(len(out[1]))]
 	out[3] = [newX / origX for i in range(len(out[3]))]
 	out[4] = [newY / origY for i in range(len(out[4]))]
 	return out.transpose()
@@ -200,8 +202,8 @@ def preprocessLabels(data):
 	# Assumes data input is in cm.
 	outX = nx // 2
 	outY = ny // 2
-	voxelXSize = voxelx * 2 * 100  # 100m of space to look at in x and y dimensions
-	voxelYSize = voxely * 2 * 100
+	voxelXSize = voxelx * 2  # scale up due to model scaling down by 2.
+	voxelYSize = voxely * 2
 	# size is based off nx and ny (just divide by 2). 7 comes from x, y, z, l ,w ,h, yaw
 	outRegress = np.zeros((outX, outY, len(anchors) * 7))
 	outValidBox = np.zeros((outX, outY, len(anchors)))
@@ -217,16 +219,18 @@ def preprocessLabels(data):
 	fixedData = data * fixBoxScaling(data.shape, outX, outY, nx, ny)
 
 	# Iterate through anchors and bounding boxes in fixedData and update outRegress and outClass as necessary based on IoU
-	centerZ = -0.5  # hard set z center of anchors to -.05 dude just trust me.
+	centerZ = 1.  # hard set z center of anchors to 1. m dude just trust me.
 	for i in range(len(anchors)):
-		for xVoxel in range(outX):
+		for xVoxel in range(int(-outX / 2), int(outX / 2)):
 			# Do calculations in terms of cm now.
 			centerX = voxelXSize * xVoxel + (voxelXSize / 2)
-			if centerX - (anchors[i][0] / 2) < 0 or centerX + (anchors[i][0] / 2) > voxelXSize * outX:
+			if centerX - (anchors[i][0] / 2) < voxelXSize * int(-outX / 2) \
+					or centerX + (anchors[i][0] / 2) > voxelXSize * int(outX / 2):
 				continue
-			for yVoxel in range(outY):
+			for yVoxel in range(int(-outY / 2), int(outY / 2)):
 				centerY = voxelYSize * yVoxel + (voxelYSize / 2)
-				if centerY - (anchors[i][1] / 2) < 0 or centerY + (anchors[i][1] / 2) > voxelYSize * outY:
+				if centerY - (anchors[i][1] / 2) < voxelYSize * int(-outY / 2) \
+						or centerY + (anchors[i][1] / 2) > voxelYSize * int(outY / 2):
 					continue
 				# if we get here, then the anchor is within the range of the area we want to look at
 				# now look at every bounding box for best IoU
@@ -252,7 +256,7 @@ def preprocessLabels(data):
 					# tl = log(l / la)
 					# tw = log(w / wa)
 					# th = log(h / ha)
-					# tyaw = ???
+					# tyaw = yaw - anchorYaw
 					# TODO Add yaw rotation. For now just use raw rotation value.
 					tx = (fixedData[labelBoxNum][0] - centerX) / anchorBox[3]
 					ty = (fixedData[labelBoxNum][1] - centerY) / anchorBox[4]
@@ -260,7 +264,7 @@ def preprocessLabels(data):
 					tl = np.log(fixedData[labelBoxNum][3] / anchorBox[3])
 					tw = np.log(fixedData[labelBoxNum][4] / anchorBox[4])
 					th = np.log(fixedData[labelBoxNum][5] / anchorBox[5])
-					tyaw = fixedData[labelBoxNum][6]
+					tyaw = fixedData[labelBoxNum][6] - anchorBox[6]
 
 					if iou > bestIouForBox[labelBoxNum]:
 						bestIouForBox[labelBoxNum] = iou
@@ -298,7 +302,7 @@ def preprocessLabels(data):
 			outValidBox[bestAnchor[0], bestAnchor[1], bestAnchor[2]] = 1
 			outRpnOverlap[bestAnchor[0], bestAnchor[1], bestAnchor[2]] = 1
 			outRegress[bestAnchor[0], bestAnchor[1],
-					   bestAnchor[2] * 7 + bestAnchor[2] * 7 + 7] = bestRegressionForBox[labelBoxNum]
+					   bestAnchor[2] * 7 : bestAnchor[2] * 7 + 7] = bestRegressionForBox[labelBoxNum]
 
 	# Also want to remove some negative regions if there are a lot more negatives in the region than positives.
 	posLocs = np.where(np.logical_and(outValidBox[:, :, :] == 1, outRpnOverlap[:, :, :] == 1))
@@ -309,13 +313,13 @@ def preprocessLabels(data):
 	posRegionCount = len(posLocs[0])
 	if posRegionCount > maxRegions / 2:
 		# randomly make some positive regions invalid
-		locs = random.sample(range(posRegionCount), posRegionCount - maxRegions / 2)
+		locs = random.sample(range(posRegionCount), int(posRegionCount - maxRegions / 2))
 		outValidBox[posLocs[0][locs], posLocs[1][locs], posLocs[2][locs]] = 0
 		posRegionCount = maxRegions / 2
 
 	if len(negLocs[0]) + posRegionCount > maxRegions:
 		# randomly remove negative regions until in size
-		locs = random.sample(range(len(negLocs[0])), len(negLocs[0]) - posRegionCount)
+		locs = random.sample(range(len(negLocs[0])), len(negLocs[0]) - int(posRegionCount))
 		outValidBox[negLocs[0][locs], negLocs[1][locs], negLocs[2][locs]] = 0
 
 	# Format results.
@@ -351,17 +355,32 @@ def imageToRPN(sample):
 	# pre-process labels
 	labels = []
 	annsTokens = sample['anns']
+	my_sample_data = level5Data.get('sample_data', sample['data']['LIDAR_TOP'])
+	ego = level5Data.get('ego_pose', my_sample_data['ego_pose_token'])
 	for token in annsTokens:
 		ann = level5Data.get('sample_annotation', token)
-		row = ann['translation']
+
+		# do a inverse transpose to get the annotation data from global coords to local
+		translation = np.array(ann['translation']).reshape((1, -1))
+		translation = translation - np.array(ego['translation'])
+		translation = rotate_points(translation, np.array(ego['rotation']), True)
+
+		row = []
+		row += [translation[0, 0]]
+		row += [translation[0, 1]]
+		row += [translation[0, 2]]
+		#     row = ann['translation']
+		#     row = [x / 100 for x in row]  # translate to m
 		row += ann['size']
 		quaternion = Quaternion(ann['rotation'])
 		row += [quaternion.yaw_pitch_roll[0]]
 		instance = level5Data.get('instance', ann['instance_token'])
 		category = level5Data.get('category', instance['category_token'])['name']
 		# row += [catToNum[category]]
-		# Only adds cars
-		if catToNum[category] == 0:
+		# Only adds cars within our range of -50 to 50 in x and y
+		if catToNum[category] == 0 \
+				and row[0] >= -50 and row[0] <= 50 \
+				and row[1] >= -50 and row[1] <= 50:
 			labels.append(row)
 	labels = np.array(labels)
 	# for right now, only care about cars
@@ -384,7 +403,8 @@ def imageToRPNWrapper(i, sample, lock):
 	regressMap.append([i, outRegress])
 	print('sample ' + str(i) + ' finished')
 	lock.release()
-	
+
+
 def imageToRPNWrapper2(samples, lock):
 	global classMap
 	global regressMap
@@ -421,19 +441,19 @@ def saveLabelsForSample(samples, outPath):
 
 	# for sample in samples:
 	threads = []
-	#for i in range(len(samples)):
+	# for i in range(len(samples)):
 	#	t = threading.Thread(target=imageToRPNWrapper, args=(i, samples[i], lock))
 	#	threads.append(t)
 	#	t.start()
-	header = int(len(samples) / 30)
-	if len(samples) % 30 != 0:
+	header = int(len(samples) / 6)
+	if len(samples) % 6 != 0:
 		print(header)
 		sys.exit()
-		
+
 	keys = list(range(len(samples)))
 	keyedSamples = list(zip(keys, samples))
-	for i in range(30):
-		tempSamples = keyedSamples[i*header:i*header + header]
+	for i in range(6):
+		tempSamples = keyedSamples[i * header:i * header + header]
 		t = threading.Thread(target=imageToRPNWrapper2, args=(tempSamples, lock))
 		threads.append(t)
 	print('created all threads')
@@ -445,7 +465,7 @@ def saveLabelsForSample(samples, outPath):
 	# now sort
 	classMap = sorted(classMap, key=itemgetter(0))
 	regressMap = sorted(regressMap, key=itemgetter(0))
-	
+
 	classMap = [x[1] for x in classMap]
 	regressMap = [x[1] for x in regressMap]
 
@@ -489,9 +509,9 @@ if __name__ == '__main__':
 		json_path=dataDir + '\\train_data',
 		verbose=True
 	)
-	#scene = level5Data.scene[0]
-	#sample = level5Data.get('sample', scene['first_sample_token'])
-	#sample2 = level5Data.get('sample', sample['next'])
+	# scene = level5Data.scene[0]
+	# sample = level5Data.get('sample', scene['first_sample_token'])
+	# sample2 = level5Data.get('sample', sample['next'])
 	# saveLabelsForSample([sample, sample2], 'labels')
 	samples = []
 	for scene in level5Data.scene:
