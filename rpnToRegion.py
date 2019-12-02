@@ -1,11 +1,13 @@
 import matplotlib
 
-matplotlib.use('agg')
-
 import math
 from lyft_dataset_sdk.lyftdataset import LyftDataset
 import numpy as np
 import serialize_data_threading as LoadDataModule
+from TestLearner import combine_lidar_data
+
+matplotlib.use('TkAgg')
+from matplotlib import pyplot as plt
 
 
 def nonMaxSuppressionFast(boxInfo, probInfo, overlapThresh=0.9, maxBoxes=300):
@@ -16,7 +18,7 @@ def nonMaxSuppressionFast(boxInfo, probInfo, overlapThresh=0.9, maxBoxes=300):
 	#	repeat above 2 steps until no items left in probability information.
 
 	if len(probInfo) == 0:
-		return []
+		return [], []
 
 	xInfo = boxInfo[:, 0]
 	yInfo = boxInfo[:, 1]
@@ -33,6 +35,7 @@ def nonMaxSuppressionFast(boxInfo, probInfo, overlapThresh=0.9, maxBoxes=300):
 	idxs = np.argsort(probInfo)
 
 	while len(idxs) > 0:
+		print('fast max suppression idx length:',len(idxs),'picks count:',len(pick))
 		# get the last (highest prob) value
 		last = len(idxs) - 1
 		currI = idxs[last]
@@ -43,10 +46,10 @@ def nonMaxSuppressionFast(boxInfo, probInfo, overlapThresh=0.9, maxBoxes=300):
 				   lengthInfo[currI], widthInfo[currI], heightInfo[currI],
 				   yawInfo[currI]]
 		toDelete = []
-		for subI in len(idxs[:last]):
+		for subI in idxs[:last]:
 			box = [xInfo[subI], yInfo[subI], zInfo[subI],
-					   lengthInfo[subI], widthInfo[subI], heightInfo[subI],
-					   yawInfo[subI]]
+				   lengthInfo[subI], widthInfo[subI], heightInfo[subI],
+				   yawInfo[subI]]
 			iou = LoadDataModule.calculateIoU(lastBox, box)
 			if iou > overlapThresh:
 				toDelete.append(subI)
@@ -57,7 +60,7 @@ def nonMaxSuppressionFast(boxInfo, probInfo, overlapThresh=0.9, maxBoxes=300):
 			break
 	boxes = boxInfo[pick]
 	probs = probInfo[pick]
-	return boxInfo, probInfo
+	return boxes, probs
 
 
 def applyRegrssion(x, y, z, l, w, h, theta, tx, ty, tz, tl, tw, th, tyaw):
@@ -112,7 +115,7 @@ def rpnToRegion(labelsClass, labelsRegress):
 	# A is the coordinates for the 2 anchors for every point in the feature map
 	#	Coordinates are x, y, z, l, w, h, yaw
 	A = np.zeros((7,) + labelsClass.shape)
-	X, Y = np.meshgrid(np.arange(outX), np.arange(outY, -1, -1))
+	X, Y = np.meshgrid(np.arange(outX), np.arange(outY))
 
 	for i in range(len(LoadDataModule.anchors)):
 		currAnchor = LoadDataModule.anchors[i]
@@ -120,8 +123,8 @@ def rpnToRegion(labelsClass, labelsRegress):
 		currRegress = np.transpose(currRegress, (2, 0, 1))  # move
 
 		# populate A with the 7 coordinates for every anchor
-		A[0, :, :, i] = X * voxelXSize
-		A[1, :, :, i] = Y * voxelYSize
+		A[0, :, :, i] = X.T * voxelXSize
+		A[1, :, :, i] = Y.T * voxelYSize
 		A[2, :, :, i] = 1.
 		A[3, :, :, i] = currAnchor[0]  # length of anchor
 		A[4, :, :, i] = currAnchor[1]  # width of anchor
@@ -142,17 +145,19 @@ def rpnToRegion(labelsClass, labelsRegress):
 
 	# remove illegal boxes
 	idxs = np.where((lengthInfo < 0) | (widthInfo < 0) | (heightInfo < 0))
-	boxInfo = np.delete(boxInfo, idxs, 0)
-	probInfo = np.delete(probInfo, idxs, 0)
+	if(len(idxs[0]) > 0):
+		boxInfo = np.delete(boxInfo, idxs, 0)
+		probInfo = np.delete(probInfo, idxs, 0)
 
-	result = nonMaxSuppressionFast(boxInfo, probInfo)
+	result = nonMaxSuppressionFast(boxInfo, probInfo, maxBoxes=100, overlapThresh=0.1)
 	return result
 
 
 if __name__ == '__main__':
 	# code adapated from 2D RPN to ROI calcultion found at:
 	# https://www.pyimagesearch.com/2015/02/16/faster-non-maximum-suppression-python/
-	dataDir = 'C:\\Users\\snkim\\Desktop\\poject\\data'
+	# dataDir = 'C:\\Users\\snkim\\Desktop\\poject\\data'
+	dataDir = 'E:\\CS539 Machine Learning\\3d-object-detection-for-autonomous-vehicles'
 
 	# load dataset
 	level5Data = LyftDataset(
@@ -160,5 +165,24 @@ if __name__ == '__main__':
 		json_path=dataDir + '\\train_data',
 		verbose=True
 	)
-	predictClass = np.load('C:\\Users\\snkim\\Desktop\\poject')
-	predictRegress = np.load('C:\\Users\\snkim\\Desktop\\poject')
+	predictClass = np.load('wrongThetaFiles\\sample0_label.npy')
+	predictRegress = np.load('wrongThetaFiles\\sample0_regress.npy')
+
+	predictClass = np.reshape(predictClass, predictClass.shape[1:])
+	predictRegress = np.reshape(predictRegress, predictRegress.shape[1:])
+
+	boxes, probs = rpnToRegion(predictClass, predictRegress)
+
+	# fix positioning on boxes
+	boxes[:, 0] = boxes[:,0] - 50
+	boxes[:, 1] = boxes[:,1] - 50
+
+	# now lets do some checking
+	sample = level5Data.get('sample', level5Data.scene[0]['first_sample_token'])
+	lidarPoints = combine_lidar_data(sample, dataDir)
+	plt.figure(figsize=(12, 12))
+	plt.axis('equal')
+	plt.scatter(np.clip(lidarPoints[:, 0], -50, 50),
+				np.clip(lidarPoints[:, 1], -50, 50), s=1, c='#000000')
+	plt.scatter(boxes[:, 0], boxes[:, 1], s=4, c='#00e083')
+	plt.show()

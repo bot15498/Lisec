@@ -452,4 +452,4 @@ if __name__ == '__main__':
 	samples = []
 	for scene in level5Data.scene:
 		samples.append(level5Data.get('sample', scene['first_sample_token']))
-	saveLabelsForSample(samples[0:90], 'C:\\Users\\Skyler\\Documents\\_CS539_ml\\project\\Lyft-Object-Detection\\labels2')
+	saveLabelsForSample(samples[0:15], 'C:\\Users\\Skyler\\Documents\\_CS539_ml\\project\\Lyft-Object-Detection\\labels2')
