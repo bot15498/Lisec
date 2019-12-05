@@ -354,13 +354,48 @@ def main2(samples):
 	model.save('C:\\Users\\snkim\\Desktop\\poject\\models\\180SampleEpoch0.h5')
 
 
+def predictMain(samples, outPath):
+	import time
+	# Set constants
+	dataDir = 'E:\\CS539 Machine Learning\\3d-object-detection-for-autonomous-vehicles'
+	# os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
+	model = load_model('fixedTheta\\15SampleEpoch0_fixed.h5',
+					   custom_objects={'RepeatLayer': RepeatLayer, 'MaxPoolingVFELayer': MaxPoolingVFELayer})
+
+	points = []
+	# for sample in samples:
+	for i in range(len(samples)):
+		# pre-process data
+		sampleLidarPoints = combine_lidar_data(samples[i], dataDir)
+		startTime = time.time()
+		trainVFEPoints = VFE_preprocessing(sampleLidarPoints, voxelx, voxely, voxelz, maxPoints, nx // 2, ny // 2, nz)
+		trainVFEPoints = sparse.reshape(trainVFEPoints, (1,) + trainVFEPoints.shape)
+		testVFEPointsDense = sparse.to_dense(trainVFEPoints, default_value=0., validate_indices=False)
+		# points.append(testVFEPointsDense)
+		endTime = time.time()
+		print(endTime - startTime)
+		print('finished ' + str(i))
+		# Turn into 6 rank tensor, then convert it to dense because keras is stupid
+		# testVFEPoints = sparse.reshape(testVFEPoints, (1,) + testVFEPoints.shape)
+		# testVFEPointsDense = sparse.to_dense(testVFEPoints, default_value=0., validate_indices=False)
+		prob, regress = model.predict(testVFEPointsDense)
+		np.save(outPath + '\\sample' + str(i) + '_label.npy', prob)
+		np.save(outPath + '\\sample' + str(i) + '_regress.npy', regress)
+
 if __name__ == '__main__':
 	#scene = level5Data.scene[0]
 	#sample = level5Data.get('sample', scene['first_sample_token'])
 	#sample2 = level5Data.get('sample', sample['next'])
 	#main2([sample, sample2])
+	# samples = []
+	# for scene in level5Data.scene:
+	# 	samples.append(level5Data.get('sample', scene['first_sample_token']))
+	# print('Training on ' + str(len(samples)))
+	# main2(samples[:])
+
 	samples = []
 	for scene in level5Data.scene:
 		samples.append(level5Data.get('sample', scene['first_sample_token']))
-	print('Training on ' + str(len(samples)))
-	main2(samples[:])
+	print('Testing on ' + str(len(samples)))
+	predictMain(samples, 'fixedTheta')

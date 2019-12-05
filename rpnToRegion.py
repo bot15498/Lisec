@@ -5,9 +5,11 @@ from lyft_dataset_sdk.lyftdataset import LyftDataset
 import numpy as np
 import serialize_data_threading as LoadDataModule
 from TestLearner import combine_lidar_data
+from pyquaternion import Quaternion
 
 matplotlib.use('TkAgg')
 from matplotlib import pyplot as plt
+import matplotlib.patches as patches
 
 
 def nonMaxSuppressionFast(boxInfo, probInfo, overlapThresh=0.9, maxBoxes=300):
@@ -35,7 +37,7 @@ def nonMaxSuppressionFast(boxInfo, probInfo, overlapThresh=0.9, maxBoxes=300):
 	idxs = np.argsort(probInfo)
 
 	while len(idxs) > 0:
-		print('fast max suppression idx length:',len(idxs),'picks count:',len(pick))
+		print('fast max suppression idx length:', len(idxs), 'picks count:', len(pick))
 		# get the last (highest prob) value
 		last = len(idxs) - 1
 		currI = idxs[last]
@@ -47,12 +49,18 @@ def nonMaxSuppressionFast(boxInfo, probInfo, overlapThresh=0.9, maxBoxes=300):
 				   yawInfo[currI]]
 		toDelete = []
 		for subI in idxs[:last]:
-			box = [xInfo[subI], yInfo[subI], zInfo[subI],
-				   lengthInfo[subI], widthInfo[subI], heightInfo[subI],
-				   yawInfo[subI]]
-			iou = LoadDataModule.calculateIoU(lastBox, box)
-			if iou > overlapThresh:
+			if xInfo[subI] - LoadDataModule.anchors[0][0] < 0 \
+					or xInfo[subI] + LoadDataModule.anchors[0][0] > 100 \
+					or yInfo[subI] - LoadDataModule.anchors[0][1] < 0 \
+					or yInfo[subI] + LoadDataModule.anchors[0][1] > 100:
 				toDelete.append(subI)
+			else:
+				box = [xInfo[subI], yInfo[subI], zInfo[subI],
+					   lengthInfo[subI], widthInfo[subI], heightInfo[subI],
+					   yawInfo[subI]]
+				iou = LoadDataModule.calculateIoU(lastBox, box)
+				if iou > overlapThresh:
+					toDelete.append(subI)
 		idxs = np.delete(idxs, (last,))
 		idxs = np.delete(idxs, toDelete)
 
@@ -123,8 +131,8 @@ def rpnToRegion(labelsClass, labelsRegress):
 		currRegress = np.transpose(currRegress, (2, 0, 1))  # move
 
 		# populate A with the 7 coordinates for every anchor
-		A[0, :, :, i] = X.T * voxelXSize
-		A[1, :, :, i] = Y.T * voxelYSize
+		A[0, :, :, i] = X.T * voxelXSize - voxelXSize / 2
+		A[1, :, :, i] = Y.T * voxelYSize - voxelYSize / 2
 		A[2, :, :, i] = 1.
 		A[3, :, :, i] = currAnchor[0]  # length of anchor
 		A[4, :, :, i] = currAnchor[1]  # width of anchor
@@ -145,12 +153,44 @@ def rpnToRegion(labelsClass, labelsRegress):
 
 	# remove illegal boxes
 	idxs = np.where((lengthInfo < 0) | (widthInfo < 0) | (heightInfo < 0))
-	if(len(idxs[0]) > 0):
+	if (len(idxs[0]) > 0):
 		boxInfo = np.delete(boxInfo, idxs, 0)
 		probInfo = np.delete(probInfo, idxs, 0)
 
-	result = nonMaxSuppressionFast(boxInfo, probInfo, maxBoxes=100, overlapThresh=0.1)
+	result = nonMaxSuppressionFast(boxInfo, probInfo, maxBoxes=20, overlapThresh=0.)
 	return result
+
+
+def showAnn(sample, plot):
+	annsTokens = sample['anns']
+	my_sample_data = level5Data.get('sample_data', sample['data']['LIDAR_TOP'])
+	ego = level5Data.get('ego_pose', my_sample_data['ego_pose_token'])
+	labels = []
+	for token in annsTokens:
+		ann = level5Data.get('sample_annotation', token)
+
+		# do a inverse transpose to get the annotation data from global coords to local
+		translation = np.array(ann['translation']).reshape((1, -1))
+		translation = translation - np.array(ego['translation'])
+		translation = LoadDataModule.rotate_points(translation, np.array(ego['rotation']), True)
+
+		row = []
+		row += [translation[0, 0]]
+		row += [translation[0, 1]]
+		row += [translation[0, 2]]
+		row += ann['size']
+		quaternion = Quaternion(ann['rotation'])
+		row += [quaternion.yaw_pitch_roll[0]]
+		instance = level5Data.get('instance', ann['instance_token'])
+		category = level5Data.get('category', instance['category_token'])['name']
+		# row += [catToNum[category]]
+		# Only adds cars within our range of -50 to 50 in x and y
+		if category == 'car' \
+				and row[0] >= -50 and row[0] <= 50 \
+				and row[1] >= -50 and row[1] <= 50:
+			labels.append(row)
+	labels = np.array(labels)
+	plot.scatter(labels[:,0], labels[:,1],s=4, c='#ff0055')
 
 
 if __name__ == '__main__':
@@ -174,15 +214,20 @@ if __name__ == '__main__':
 	boxes, probs = rpnToRegion(predictClass, predictRegress)
 
 	# fix positioning on boxes
-	boxes[:, 0] = boxes[:,0] - 50
-	boxes[:, 1] = boxes[:,1] - 50
+	boxes[:, 0] = boxes[:, 0] - 50
+	boxes[:, 1] = boxes[:, 1] - 50
 
 	# now lets do some checking
 	sample = level5Data.get('sample', level5Data.scene[0]['first_sample_token'])
 	lidarPoints = combine_lidar_data(sample, dataDir)
-	plt.figure(figsize=(12, 12))
-	plt.axis('equal')
-	plt.scatter(np.clip(lidarPoints[:, 0], -50, 50),
-				np.clip(lidarPoints[:, 1], -50, 50), s=1, c='#000000')
-	plt.scatter(boxes[:, 0], boxes[:, 1], s=4, c='#00e083')
+	fig = plt.figure(figsize=(12, 12))
+	ax = fig.add_subplot(111)
+	# plt.axis('equal')
+	ax.scatter(np.clip(lidarPoints[:, 0], -50, 50),
+			   np.clip(lidarPoints[:, 1], -50, 50), s=1, c='#000000')
+	ax.scatter(boxes[:, 0], boxes[:, 1], s=4, c='#00e083')
+	for box in boxes:
+		p = patches.Rectangle((box[0] - box[3] / 2, box[1] - box[4] / 2), box[3], box[4], angle=math.degrees(box[6]))
+		ax.add_patch(p)
+	showAnn(sample, ax)
 	plt.show()
