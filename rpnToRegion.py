@@ -3,9 +3,11 @@ import matplotlib
 import math
 from lyft_dataset_sdk.lyftdataset import LyftDataset
 import numpy as np
-import serialize_data_threading as LoadDataModule
+import serialize_data as LoadDataModule
 from TestLearner import combine_lidar_data
 from pyquaternion import Quaternion
+from shapely.ops import cascaded_union
+from shapely.geometry import Polygon
 
 matplotlib.use('TkAgg')
 from matplotlib import pyplot as plt
@@ -131,8 +133,8 @@ def rpnToRegion(labelsClass, labelsRegress):
 		currRegress = np.transpose(currRegress, (2, 0, 1))  # move
 
 		# populate A with the 7 coordinates for every anchor
-		A[0, :, :, i] = X.T * voxelXSize - voxelXSize / 2
-		A[1, :, :, i] = Y.T * voxelYSize - voxelYSize / 2
+		A[0, :, :, i] = X.T * voxelXSize + voxelXSize / 2
+		A[1, :, :, i] = Y.T * voxelYSize + voxelYSize / 2
 		A[2, :, :, i] = 1.
 		A[3, :, :, i] = currAnchor[0]  # length of anchor
 		A[4, :, :, i] = currAnchor[1]  # width of anchor
@@ -191,6 +193,65 @@ def showAnn(sample, plot):
 			labels.append(row)
 	labels = np.array(labels)
 	plot.scatter(labels[:,0], labels[:,1],s=4, c='#ff0055')
+	for box in labels:
+		p = patches.Rectangle((box[0] - box[3] / 2, box[1] - box[4] / 2), box[3], box[4], fill=False, color="#ff0055")
+		ax.add_patch(p)
+
+
+def calcIntersectAll(boxBoxes, annsBoxes):
+	# Turn each group of boxes into polygons, combine them, then find intersection
+	predictPolygons = []
+	for box in boxBoxes:
+		predictPolygons.append(LoadDataModule.boxToShapely(box))
+	predictCombined = cascaded_union(predictPolygons[:])
+
+	labelBoxes = []
+	for box in annsBoxes:
+		labelBoxes.append(LoadDataModule.boxToShapely(box))
+	labelCombined = cascaded_union(labelBoxes[:])
+	return predictCombined.intersection(labelCombined).area
+
+def calcUnionAll(boxesBoxes, annsBoxes, intersect):
+	annsSum = 0
+	for box in annsBoxes:
+		annsSum += box[3] * box[4] * box[5]
+	predictSum = 0
+	for box in boxesBoxes:
+		predictSum += box[3] * box[4] * box[5]
+	return annsSum + predictSum - intersect
+
+def calcIoUAll(predictBoxes, sample):
+	annsTokens = sample['anns']
+	my_sample_data = level5Data.get('sample_data', sample['data']['LIDAR_TOP'])
+	ego = level5Data.get('ego_pose', my_sample_data['ego_pose_token'])
+	labels = []
+	for token in annsTokens:
+		ann = level5Data.get('sample_annotation', token)
+		# do a inverse transpose to get the annotation data from global coords to local
+		translation = np.array(ann['translation']).reshape((1, -1))
+		translation = translation - np.array(ego['translation'])
+		translation = LoadDataModule.rotate_points(translation, np.array(ego['rotation']), True)
+
+		row = []
+		row += [translation[0, 0]]
+		row += [translation[0, 1]]
+		row += [translation[0, 2]]
+		row += ann['size']
+		quaternion = Quaternion(ann['rotation'])
+		row += [quaternion.yaw_pitch_roll[0]]
+		instance = level5Data.get('instance', ann['instance_token'])
+		category = level5Data.get('category', instance['category_token'])['name']
+		# row += [catToNum[category]]
+		# Only adds cars within our range of -50 to 50 in x and y
+		if category == 'car' \
+				and row[0] >= -50 and row[0] <= 50 \
+				and row[1] >= -50 and row[1] <= 50:
+			labels.append(row)
+	labelsBoxes = np.array(labels)
+
+	intersect = calcIntersectAll(predictBoxes, labelsBoxes)
+	union = calcUnionAll(predictBoxes, labelsBoxes, intersect)
+	return intersect / union
 
 
 if __name__ == '__main__':
@@ -205,8 +266,8 @@ if __name__ == '__main__':
 		json_path=dataDir + '\\train_data',
 		verbose=True
 	)
-	predictClass = np.load('wrongThetaFiles\\sample0_label.npy')
-	predictRegress = np.load('wrongThetaFiles\\sample0_regress.npy')
+	predictClass = np.load('singleSample\\sample0_label.npy')
+	predictRegress = np.load('singleSample\\sample0_regress.npy')
 
 	predictClass = np.reshape(predictClass, predictClass.shape[1:])
 	predictRegress = np.reshape(predictRegress, predictRegress.shape[1:])
@@ -225,9 +286,10 @@ if __name__ == '__main__':
 	# plt.axis('equal')
 	ax.scatter(np.clip(lidarPoints[:, 0], -50, 50),
 			   np.clip(lidarPoints[:, 1], -50, 50), s=1, c='#000000')
-	ax.scatter(boxes[:, 0], boxes[:, 1], s=4, c='#00e083')
+	ax.scatter(boxes[:, 0], boxes[:, 1], s=4, c='#3461eb')
 	for box in boxes:
-		p = patches.Rectangle((box[0] - box[3] / 2, box[1] - box[4] / 2), box[3], box[4], angle=math.degrees(box[6]))
+		p = patches.Rectangle((box[0] - box[3] / 2, box[1] - box[4] / 2), box[3], box[4], fill=False, color='#3461eb')
 		ax.add_patch(p)
 	showAnn(sample, ax)
+	print('IoU for sample:',calcIoUAll(boxes, sample))
 	plt.show()

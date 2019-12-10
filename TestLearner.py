@@ -360,7 +360,7 @@ def predictMain(samples, outPath):
 	dataDir = 'E:\\CS539 Machine Learning\\3d-object-detection-for-autonomous-vehicles'
 	# os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
-	model = load_model('fixedTheta\\15SampleEpoch0_fixed.h5',
+	model = load_model('singleSample\\1Sample10Epoch_fixed.h5',
 					   custom_objects={'RepeatLayer': RepeatLayer, 'MaxPoolingVFELayer': MaxPoolingVFELayer})
 
 	points = []
@@ -398,4 +398,4 @@ if __name__ == '__main__':
 	for scene in level5Data.scene:
 		samples.append(level5Data.get('sample', scene['first_sample_token']))
 	print('Testing on ' + str(len(samples)))
-	predictMain(samples, 'fixedTheta')
+	predictMain(samples, 'singleSample')
