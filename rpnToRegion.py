@@ -8,6 +8,7 @@ from TestLearner import combine_lidar_data
 from pyquaternion import Quaternion
 from shapely.ops import cascaded_union
 from shapely.geometry import Polygon
+import Constants
 
 matplotlib.use('TkAgg')
 from matplotlib import pyplot as plt
@@ -51,10 +52,10 @@ def nonMaxSuppressionFast(boxInfo, probInfo, overlapThresh=0.9, maxBoxes=300):
 				   yawInfo[currI]]
 		toDelete = []
 		for subI in idxs[:last]:
-			if xInfo[subI] - LoadDataModule.anchors[0][0] < 0 \
-					or xInfo[subI] + LoadDataModule.anchors[0][0] > 100 \
-					or yInfo[subI] - LoadDataModule.anchors[0][1] < 0 \
-					or yInfo[subI] + LoadDataModule.anchors[0][1] > 100:
+			if xInfo[subI] - Constants.anchors[0][0] < 0 \
+					or xInfo[subI] + Constants.anchors[0][0] > 100 \
+					or yInfo[subI] - Constants.anchors[0][1] < 0 \
+					or yInfo[subI] + Constants.anchors[0][1] > 100:
 				toDelete.append(subI)
 			else:
 				box = [xInfo[subI], yInfo[subI], zInfo[subI],
@@ -117,18 +118,18 @@ def applyRegrssionNP(X, regress):
 def rpnToRegion(labelsClass, labelsRegress):
 	# ASSUMES THAT OUTPUT OF RPN IS MAP DIVIDED BY 2. Our network does this.
 	# Assumes data input is in cm.
-	outX = LoadDataModule.nx // 2
-	outY = LoadDataModule.ny // 2
-	voxelXSize = LoadDataModule.voxelx * 2
-	voxelYSize = LoadDataModule.voxely * 2
+	outX = Constants.nx // 2
+	outY = Constants.ny // 2
+	voxelXSize = Constants.voxelx * 2
+	voxelYSize = Constants.voxely * 2
 
 	# A is the coordinates for the 2 anchors for every point in the feature map
 	#	Coordinates are x, y, z, l, w, h, yaw
 	A = np.zeros((7,) + labelsClass.shape)
 	X, Y = np.meshgrid(np.arange(outX), np.arange(outY))
 
-	for i in range(len(LoadDataModule.anchors)):
-		currAnchor = LoadDataModule.anchors[i]
+	for i in range(len(Constants.anchors)):
+		currAnchor = Constants.anchors[i]
 		currRegress = labelsRegress[:, :, i * 7:i * 7 + 7]
 		currRegress = np.transpose(currRegress, (2, 0, 1))  # move
 
@@ -266,8 +267,8 @@ if __name__ == '__main__':
 		json_path=dataDir + '\\train_data',
 		verbose=True
 	)
-	predictClass = np.load('singleSample\\sample0_label.npy')
-	predictRegress = np.load('singleSample\\sample0_regress.npy')
+	predictClass = np.load('fixedTheta\\sample0_label.npy')
+	predictRegress = np.load('fixedTheta\\sample0_regress.npy')
 
 	predictClass = np.reshape(predictClass, predictClass.shape[1:])
 	predictRegress = np.reshape(predictRegress, predictRegress.shape[1:])
@@ -280,7 +281,7 @@ if __name__ == '__main__':
 
 	# now lets do some checking
 	sample = level5Data.get('sample', level5Data.scene[0]['first_sample_token'])
-	lidarPoints = combine_lidar_data(sample, dataDir)
+	lidarPoints = combine_lidar_data(sample, dataDir, level5Data)
 	fig = plt.figure(figsize=(12, 12))
 	ax = fig.add_subplot(111)
 	# plt.axis('equal')

@@ -1,4 +1,5 @@
 import matplotlib
+
 matplotlib.use('agg')
 from lyft_dataset_sdk.lyftdataset import LyftDataset
 from tensorflow.keras.models import Model, load_model
@@ -16,56 +17,15 @@ from math import floor
 import os
 from tensorflow import SparseTensor, sparse
 import math
+import time
 from shapely.geometry import Polygon
 
+import Constants
+
 from tensorflow.python.framework.ops import disable_eager_execution
-#disable_eager_execution()
-print(tf.executing_eagerly())
 
-# constants
-# size of voxel
-voxelx = 0.5
-voxely = 0.25
-voxelz = 0.25
-
-# max size of space to look at
-
-
-# Number of voxels in space that we care about
-nx = int(100 / voxelx)  # -50 to 50 m
-ny = int(100 / voxely)
-nz = int(2 / voxelz)
-
-# number of anchors
-anchors = [[1.6, 3.9, 1.56], [3.9, 1.6, 1.56]]
-iouLowerBound = 0.45
-iouUpperBound = 0.6
-
-# Limit of points per voxel to reduce size of data.
-maxPoints = 35
-
-# index of points in input tensor
-pointIndex = -2
-
-# map of categories:
-catToNum = {
-	'car': 0,
-	'pedestrian': 1,
-	'animal': 2,
-	'other_vehicle': 3,
-	'bus': 4,
-	'motorcycle': 5,
-	'truck': 6,
-	'emergency_vehicle': 7,
-	'bicycle': 8
-}
-
-# # load dataset
-level5Data = LyftDataset(
-	data_path='E:\\CS539 Machine Learning\\3d-object-detection-for-autonomous-vehicles',
-	json_path='E:\\CS539 Machine Learning\\3d-object-detection-for-autonomous-vehicles\\train_data',
-	verbose=True
-)
+# disable_eager_execution()
+print('Eager execution on?:', tf.executing_eagerly())
 
 
 # helper layer that transforms the (None, 250, 500, 10, 1, 6) into (None, 250, 500, 10, 35, 6) for concat
@@ -74,10 +34,10 @@ class RepeatLayer(Layer):
 		super(RepeatLayer, self).__init__(**kwargs)
 
 	def compute_output_shape(self, inputShape):
-		return inputShape[:pointIndex] + (maxPoints,) + inputShape[pointIndex + 1:]
+		return inputShape[:Constants.pointIndex] + (Constants.maxPoints,) + inputShape[Constants.pointIndex + 1:]
 
 	def call(self, inputs, **kwargs):
-		return tf_backend.repeat_elements(inputs, maxPoints, pointIndex)
+		return tf_backend.repeat_elements(inputs, Constants.maxPoints, Constants.pointIndex)
 
 
 # special pooling layer for VFE block
@@ -88,12 +48,12 @@ class MaxPoolingVFELayer(Layer):
 
 	def compute_output_shape(self, inputShape):
 		if not self.combineDim:
-			return inputShape[:pointIndex] + (1,) + inputShape[pointIndex + 1:]
+			return inputShape[:Constants.pointIndex] + (1,) + inputShape[Constants.pointIndex + 1:]
 		else:
-			return inputShape[:pointIndex] + inputShape[pointIndex + 1:]
+			return inputShape[:Constants.pointIndex] + inputShape[Constants.pointIndex + 1:]
 
 	def call(self, inputs, **kwargs):
-		return tf_backend.max(inputs, axis=pointIndex, keepdims=not self.combineDim)
+		return tf_backend.max(inputs, axis=Constants.pointIndex, keepdims=not self.combineDim)
 
 	def get_config(self):
 		baseConfig = super(MaxPoolingVFELayer, self).get_config()
@@ -110,7 +70,7 @@ def rotate_points(points, rotation, inverse=False):
 
 
 # Takes the sample dict and returns an array of n,3 with every point in the sample.
-def combine_lidar_data(sample, dataDir):
+def combine_lidar_data(sample, dataDir, level5Data):
 	sensorTypes = ['LIDAR_TOP', 'LIDAR_FRONT_RIGHT', 'LIDAR_FRONT_LEFT']
 	# Account for not all samples having all liar data for some reason
 	actualSensorTypes = []
@@ -125,7 +85,6 @@ def combine_lidar_data(sample, dataDir):
 		# get points
 		filePath = sensorFrame['filename'].replace('/', '\\')
 		rawPoints = np.fromfile(os.path.join(dataDir, filePath), dtype=np.float32)
-
 
 		# need to translate points to correct place.
 		rawPoints = rawPoints.reshape(-1, 5)[:, :3]
@@ -158,7 +117,7 @@ def VFE_preprocessing(points, xSize, ySize, zSize, sampleSize, maxVoxelX, maxVox
 		key = get_voxel(point, xSize, ySize, zSize)
 		if -maxVoxelX < key[0] and key[0] < maxVoxelX \
 				and -maxVoxelY < key[1] and key[1] < maxVoxelY \
-				and 0< key[2] and key[2] < maxVoxelZ:
+				and 0 < key[2] and key[2] < maxVoxelZ:
 			# remove negatives.
 			fixedKey = (key[0] + maxVoxelX, key[1] + maxVoxelY, key[2])
 			if fixedKey in clusteredPoints:
@@ -210,7 +169,7 @@ def addVFELayer(layer, startNum, endNum):
 def addFCN(layer, startNum, endNum):
 	layer = addDenseLayer(layer, endNum)
 	layer = BatchNormalization()(layer)
-	#layer = addDenseLayer(layer, endNum, 'relu')
+	# layer = addDenseLayer(layer, endNum, 'relu')
 	layer = Activation('relu')(layer)
 	return layer
 
@@ -298,104 +257,108 @@ def createModel(nx, ny, nz, maxPoints):
 	return model
 
 
-# TODO write custom loss instead of just doing mse
-def customLoss(alpha=0.5, beta=0.5):
-	def combinedLoss(y_true, y_pred):
-		y_class, y_regress = y_pred
-
-	return combinedLoss
-
-
-def main2(samples):
-	import time
-	# Set constants
-	dataDir = 'E:\\CS539 Machine Learning\\3d-object-detection-for-autonomous-vehicles'
-	labelsDir = 'C:\\Users\\snkim\\Desktop\\poject\\labels_first_sample_threading'
-	#os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-
-	points = []
-	#for sample in samples:
-	for i in range(len(samples)):
-		# pre-process data
-		sampleLidarPoints = combine_lidar_data(samples[i], dataDir)
-		startTime = time.time()
-		trainVFEPoints = VFE_preprocessing(sampleLidarPoints, voxelx, voxely, voxelz, maxPoints, nx // 2, ny // 2, nz)
-		testVFEPointsDense = sparse.to_dense(trainVFEPoints, default_value=0., validate_indices=False)
-		points.append(testVFEPointsDense)
-		endTime = time.time()
-		print(endTime - startTime)
-		print('finished ' + str(i))
-		# Turn into 6 rank tensor, then convert it to dense because keras is stupid
-		# testVFEPoints = sparse.reshape(testVFEPoints, (1,) + testVFEPoints.shape)
-		# testVFEPointsDense = sparse.to_dense(testVFEPoints, default_value=0., validate_indices=False)
-	trainPoints = tf.stack(points, axis=0)
-
-	print('loading labels')
-	# get labels from file 
-	outClass = np.load(labelsDir + '\\labelsClass.npy', allow_pickle=True)
-	outRegress = np.load(labelsDir + '\\regressClass.npy', allow_pickle=True)
-	classShape = np.load(labelsDir + '\\labelsShape.npy', allow_pickle=True)
-	regressShape = np.load(labelsDir + '\\regressShape.npy', allow_pickle=True)
-	# outClass = outClass.reshape((tuple(classShape)))
-	# outRegress = outRegress.reshape((tuple(regressShape)))
-
-	# create model
-	model = createModel(nx, ny, nz, maxPoints)
-	# plot_model(model, show_shapes=True)
-	sgd = optimizers.SGD(lr=0.01, decay=1e-6, momentum=0.9, nesterov=True)
-	model.compile(optimizer=sgd, loss=['mse', 'mse'])
-	#model.summary()
-	# model =load_model('models\\Epoch5.h5', custom_objects={'RepeatLayer' : RepeatLayer, 'MaxPoolingVFELayer' : MaxPoolingVFELayer})
-
-	# fit model
-	history = model.fit(x=trainPoints, y=[outClass, outRegress], batch_size=1, verbose=1, epochs=1, steps_per_epoch=180)
-
-	print(history.history)
-	model.save('C:\\Users\\snkim\\Desktop\\poject\\models\\180SampleEpoch0.h5')
-
-
-def predictMain(samples, outPath):
-	import time
-	# Set constants
-	dataDir = 'E:\\CS539 Machine Learning\\3d-object-detection-for-autonomous-vehicles'
+def train(samples, level5Data, save_path):
 	# os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-
-	model = load_model('singleSample\\1Sample10Epoch_fixed.h5',
-					   custom_objects={'RepeatLayer': RepeatLayer, 'MaxPoolingVFELayer': MaxPoolingVFELayer})
+	labels_dir = 'labels3'
 
 	points = []
 	# for sample in samples:
 	for i in range(len(samples)):
 		# pre-process data
-		sampleLidarPoints = combine_lidar_data(samples[i], dataDir)
+		sampleLidarPoints = combine_lidar_data(samples[i], Constants.lyft_data_dir, level5Data)
 		startTime = time.time()
-		trainVFEPoints = VFE_preprocessing(sampleLidarPoints, voxelx, voxely, voxelz, maxPoints, nx // 2, ny // 2, nz)
-		trainVFEPoints = sparse.reshape(trainVFEPoints, (1,) + trainVFEPoints.shape)
-		testVFEPointsDense = sparse.to_dense(trainVFEPoints, default_value=0., validate_indices=False)
-		# points.append(testVFEPointsDense)
+		vfe_points = VFE_preprocessing(sampleLidarPoints,
+										   Constants.voxelx,
+										   Constants.voxely,
+										   Constants.voxelz,
+										   Constants.maxPoints,
+										   Constants.nx // 2,
+										   Constants.ny // 2,
+										   Constants.nz)
+		# Need to convert to dense tensors because keras doesn't allow for sparse tensors.
+		vfe_points_dense = sparse.to_dense(vfe_points, default_value=0., validate_indices=False)
+		points.append(vfe_points_dense)
 		endTime = time.time()
 		print(endTime - startTime)
 		print('finished ' + str(i))
-		# Turn into 6 rank tensor, then convert it to dense because keras is stupid
-		# testVFEPoints = sparse.reshape(testVFEPoints, (1,) + testVFEPoints.shape)
-		# testVFEPointsDense = sparse.to_dense(testVFEPoints, default_value=0., validate_indices=False)
-		prob, regress = model.predict(testVFEPointsDense)
-		np.save(outPath + '\\sample' + str(i) + '_label.npy', prob)
-		np.save(outPath + '\\sample' + str(i) + '_regress.npy', regress)
+	# Stack into 6 rank tensor
+	trainPoints = tf.stack(points, axis=0)
+
+	print('loading labels')
+	# get labels from file 
+	outClass = np.load(labels_dir + '\\labelsClass.npy', allow_pickle=True)
+	outRegress = np.load(labels_dir + '\\regressClass.npy', allow_pickle=True)
+
+	# create model
+	model = createModel(Constants.nx, Constants.ny, Constants.nz, Constants.maxPoints)
+	# plot_model(model, show_shapes=True)
+	sgd = optimizers.SGD(lr=0.01, decay=1e-6, momentum=0.9, nesterov=True)
+	model.compile(optimizer=sgd, loss=['mse', 'mse'])
+
+	# fit model
+	history = model.fit(x=trainPoints, y=[outClass, outRegress], batch_size=1, verbose=1, epochs=1, steps_per_epoch=180)
+
+	print(history.history)
+	model.save(save_path)
+
+
+def train_with_model(samples, level5Data, model_path, save_path):
+	labels_dir = 'labels3'
+
+	points = []
+	# for sample in samples:
+	for i in range(len(samples)):
+		# pre-process data
+		sampleLidarPoints = combine_lidar_data(samples[i], Constants.lyft_data_dir, level5Data)
+		startTime = time.time()
+		vfe_points = VFE_preprocessing(sampleLidarPoints,
+									   Constants.voxelx,
+									   Constants.voxely,
+									   Constants.voxelz,
+									   Constants.maxPoints,
+									   Constants.nx // 2,
+									   Constants.ny // 2,
+									   Constants.nz)
+		# Convert to dense here because keras won't take sparse tensors
+		vfe_points_dense = sparse.to_dense(vfe_points, default_value=0., validate_indices=False)
+		points.append(vfe_points_dense)
+		endTime = time.time()
+		print(endTime - startTime)
+		print('finished ' + str(i))
+	# Turn into 6 rank tensor, then convert it to dense because keras is stupid
+	trainPoints = tf.stack(points, axis=0)
+
+	print('loading labels')
+	# get labels from file
+	outClass = np.load(labels_dir + '\\labelsClass.npy', allow_pickle=True)
+	outRegress = np.load(labels_dir + '\\regressClass.npy', allow_pickle=True)
+
+	# load model
+	model = load_model(model_path,
+					   custom_objects={'RepeatLayer': RepeatLayer, 'MaxPoolingVFELayer': MaxPoolingVFELayer})
+	sgd = optimizers.SGD(lr=0.01, decay=1e-6, momentum=0.9, nesterov=True)
+	model.compile(optimizer=sgd, loss=['mse', 'mse'])
+
+	# fit model
+	history = model.fit(x=trainPoints, y=[outClass, outRegress], batch_size=1, verbose=1, epochs=1, steps_per_epoch=180)
+
+	print(history.history)
+	model.save(save_path)
+
 
 if __name__ == '__main__':
-	#scene = level5Data.scene[0]
-	#sample = level5Data.get('sample', scene['first_sample_token'])
-	#sample2 = level5Data.get('sample', sample['next'])
-	#main2([sample, sample2])
-	# samples = []
-	# for scene in level5Data.scene:
-	# 	samples.append(level5Data.get('sample', scene['first_sample_token']))
-	# print('Training on ' + str(len(samples)))
-	# main2(samples[:])
+	# load dataset
+	level5Data = LyftDataset(
+		data_path='E:\\CS539 Machine Learning\\3d-object-detection-for-autonomous-vehicles',
+		json_path='E:\\CS539 Machine Learning\\3d-object-detection-for-autonomous-vehicles\\train_data',
+		verbose=True
+	)
 
+	save_path = 'C:\\Users\\snkim\\Desktop\\poject\\models\\180SampleEpoch0.h5'
+
+	# select the samples you want, then call the train function.
 	samples = []
 	for scene in level5Data.scene:
 		samples.append(level5Data.get('sample', scene['first_sample_token']))
-	print('Testing on ' + str(len(samples)))
-	predictMain(samples, 'singleSample')
+	print('Training on ' + str(len(samples)))
+	train(samples[:], level5Data, save_path)

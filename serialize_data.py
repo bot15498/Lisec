@@ -432,8 +432,8 @@ def saveTrainDataForSample(samples):
 if __name__ == '__main__':
 	# load dataset
 	level5Data = LyftDataset(
-		data_path=Constants.dataDir,
-		json_path=Constants.dataDir + '\\train_data',
+		data_path=Constants.lyft_data_dir,
+		json_path=Constants.lyft_data_dir + '\\train_data',
 		verbose=True
 	)
 	# scene = level5Data.scene[0]
