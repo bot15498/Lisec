@@ -1,3 +1,6 @@
+import matplotlib
+
+matplotlib.use('agg')
 from lyft_dataset_sdk.lyftdataset import LyftDataset
 import os
 from tensorflow import SparseTensor, sparse
@@ -7,6 +10,7 @@ from math import floor
 import math
 import tensorflow as tf
 from shapely.geometry import Polygon
+import random
 
 # constants
 # size of voxel
@@ -23,9 +27,12 @@ nz = int(2 / voxelz)
 maxPoints = 35
 
 # number of anchors
-anchors = [[1.6, 3.9, 1.56], [3.9, 1.6, 1.56]]
+anchors = [[1.6, 3.9, 1.56, 0], [1.6, 3.9, 1.56, math.pi / 2]]
 iouLowerBound = 0.45
 iouUpperBound = 0.6
+
+# region limiter
+maxRegions = 256
 
 # map of categories:
 catToNum = {
@@ -140,7 +147,8 @@ def calculateIntersection(box1, box2):
 
 
 def boxToShapely(box):
-	theta = math.radians(box[6])
+	# theta = math.radians(box[6])
+	theta = box[6]
 	length = box[3]
 	width = box[4]
 	refPointRight = (box[0] + math.cos(theta) * (width / 2), box[1] - math.sin(theta) * (width / 2))
@@ -174,83 +182,239 @@ def calculateIoU(box1, box2):
 def fixBoxScaling(dataSize, newX, newY, origX, origY):
 	out = np.ones(dataSize)
 	out = out.transpose()
+	out[0] = [newX / origX for i in range(len(out[0]))]
+	out[1] = [newY / origY for i in range(len(out[1]))]
 	out[3] = [newX / origX for i in range(len(out[3]))]
 	out[4] = [newY / origY for i in range(len(out[4]))]
 	return out.transpose()
 
 
 def preprocessLabels(data):
+	'''
+	Box = the bounding box / ground truth that is contained in data
+	Anchor = the anchor box values that are used to convert the Box data into something our model can understand.
+	:param data: 2D array where each row is the x, y, z, width, length, height, yaw of data.
+	:return:
+	'''
 	# ASSUMES THAT OUTPUT OF RPN IS MAP DIVIDED BY 2. Our network does this.
 	# Assumes data input is in cm.
 	outX = nx // 2
 	outY = ny // 2
-	voxelXSize = voxelx * 2 * 100
-	voxelYSize = voxely * 2 * 100
+	voxelXSize = voxelx * 2
+	voxelYSize = voxely * 2
 	# size is based off nx and ny (just divide by 2). 7 comes from x, y, z, l ,w ,h, yaw
 	outRegress = np.zeros((outX, outY, len(anchors) * 7))
-	outClass = np.zeros((outX, outY, len(anchors)))
-	outClassCheck = np.zeros((outX, outY, len(anchors)))  # used to keep track of past IoUs
+	outValidBox = np.zeros((outX, outY, len(anchors)))
+	outRpnOverlap = np.zeros((outX, outY, len(anchors)))
+
+	# save the best IoU for a specific bounding box (the label)
+	bestIouForBox = np.zeros(len(data))
+	bestAnchorForBox = np.ones((len(data), 3)).astype(int) * -1
+	countAnchorsForBox = np.zeros(len(data))
+	bestRegressionForBox = np.zeros((len(data), 7))
 
 	# scale back l and w because we cut the size of the feature space by 2 through our network
 	fixedData = data * fixBoxScaling(data.shape, outX, outY, nx, ny)
 
 	# Iterate through anchors and bounding boxes in fixedData and update outRegress and outClass as necessary based on IoU
-	centerZ = -0.5  # hard set z center of anchors to -.05 dude just trust me.
+	centerZ = 1.  # hard set z center of anchors to 1. m dude just trust me.
 	for i in range(len(anchors)):
-		for xVoxel in range(outX):
+		for xVoxel in range(int(-outX / 2), int(outX / 2)):
+			# print(xVoxel)
 			# Do calculations in terms of cm now.
 			centerX = voxelXSize * xVoxel + (voxelXSize / 2)
-			if centerX - (anchors[i][0] / 2) < 0 or centerX + (anchors[i][0] / 2) > voxelXSize * outX:
+			if centerX - (anchors[i][0] / 2) < voxelXSize * int(-outX / 2) \
+					or centerX + (anchors[i][0] / 2) > voxelXSize * int(outX / 2):
 				continue
-			for yVoxel in range(outY):
+			for yVoxel in range(int(-outY / 2), int(outY / 2)):
 				centerY = voxelYSize * yVoxel + (voxelYSize / 2)
-				if centerY - (anchors[i][1] / 2) < 0 or centerY + (anchors[i][1] / 2) > voxelYSize * outY:
+				if centerY - (anchors[i][1] / 2) < voxelYSize * int(-outY / 2) \
+						or centerY + (anchors[i][1] / 2) > voxelYSize * int(outY / 2):
 					continue
 				# if we get here, then the anchor is within the range of the area we want to look at
 				# now look at every bounding box for best IoU
-				for box in fixedData:
-					# Create anchorbox representation using set anchro sizes and add 0 for yaw.
-					anchorBox = [centerX, centerY, centerZ] + anchors[i] + [0]
-					iou = calculateIoU(anchorBox, box)
-					if iou > iouUpperBound:
-						outClass[xVoxel, yVoxel, i] = 2
-					elif iou < iouLowerBound:
-						# assumes all anchors start as 'neg'
-						outClass[xVoxel, yVoxel, i] = 0
-					else:
-						outClass[xVoxel, yVoxel, i] = 1
-					if iou > outClassCheck[xVoxel, yVoxel, i]:
-						# TODO put the update to the regression mapping here (I think)
-						outClassCheck[xVoxel, yVoxel, i] = iou
+				# start each anchor as negative, and initialize variables for best found IoU and regression constants
+				# Regression constants have 7 variables for x, y, z, l, w, h, yaw
+				boxType = 'neg'
+				bestIouForLoc = 0
+				bestRegression = (0, 0, 0, 0, 0, 0, 0)
+				for labelBoxNum in range(len(fixedData)):
+					# CenterX, CenterY, CenterZ are the centers of the anchors.
+					# Create anchorbox representation using set anchor sizes (which includes yaw)
+					anchorBox = [centerX, centerY, centerZ] + anchors[i]
+					iou = calculateIoU(anchorBox, fixedData[labelBoxNum])
+
+					# calculate regression values in case we need them
+					# x,y are the center point of ground-truth bbox
+					# xa,ya are the center point of anchor bbox
+					# w,h are the width and height of ground-truth bbox
+					# wa,ha are the width and height of anchor bboxe
+					# tx = (x - xa) / la
+					# ty = (y - ya) / wa
+					# tz = (y - ya) / za
+					# tl = log(l / la)
+					# tw = log(w / wa)
+					# th = log(h / ha)
+					# tyaw = yaw - anchorYaw
+					# TODO Add yaw rotation. For now just use raw rotation value.
+					tx = (fixedData[labelBoxNum][0] - centerX) / anchorBox[3]
+					ty = (fixedData[labelBoxNum][1] - centerY) / anchorBox[4]
+					tz = (fixedData[labelBoxNum][2] - centerZ) / anchorBox[5]
+					tl = np.log(fixedData[labelBoxNum][3] / anchorBox[3])
+					tw = np.log(fixedData[labelBoxNum][4] / anchorBox[4])
+					th = np.log(fixedData[labelBoxNum][5] / anchorBox[5])
+					tyaw = fixedData[labelBoxNum][6] - anchorBox[6]
+
+					if iou > bestIouForBox[labelBoxNum]:
+						bestIouForBox[labelBoxNum] = iou
+						bestAnchorForBox[labelBoxNum] = (xVoxel, yVoxel, i)
+						bestRegressionForBox[labelBoxNum] = (tx, ty, tz, tl, tw, th, tyaw)
+					if iou >= iouUpperBound:
+						boxType = 'pos'
+						countAnchorsForBox[labelBoxNum] += 1
+						if iou > bestIouForLoc:
+							bestIouForLoc = iou
+							bestRegression = (tx, ty, tz, tl, tw, th, tyaw)
+					if iouLowerBound < iou <= iouUpperBound and boxType != 'pos':
+						boxType = 'neutral'
+
+				if boxType == 'neg':
+					outValidBox[xVoxel, yVoxel, i] = 1
+					outRpnOverlap[xVoxel, yVoxel, i] = 0
+				elif boxType == 'neutral':
+					outValidBox[xVoxel, yVoxel, i] = 0
+					outRpnOverlap[xVoxel, yVoxel, i] = 0
+				elif boxType == 'pos':
+					# print('pos at', xVoxel, yVoxel, i)
+					outValidBox[xVoxel, yVoxel, i] = 1
+					outRpnOverlap[xVoxel, yVoxel, i] = 1
+					# save into first 7 values if anchor 0, save into next  values if anchor 1, and so on.
+					outRegress[xVoxel, yVoxel, i * 7:i * 7 + 7] = bestRegression
+
+	# Now check to make sure that every bounding box has at least one positive anchor.
+	# If not, we need to get the best one and populate it into the regression map.
+	for labelBoxNum in range(len(countAnchorsForBox)):
+		if countAnchorsForBox[labelBoxNum] == 0:
+			if bestIouForBox[labelBoxNum] == 0:
+				# all IoUs are 0 for some reason so pass over
+				continue
+			bestAnchor = bestAnchorForBox[labelBoxNum]
+			outValidBox[bestAnchor[0], bestAnchor[1], bestAnchor[2]] = 1
+			outRpnOverlap[bestAnchor[0], bestAnchor[1], bestAnchor[2]] = 1
+			outRegress[bestAnchor[0], bestAnchor[1],
+					   bestAnchor[2] * 7 : bestAnchor[2] * 7 + 7] = bestRegressionForBox[labelBoxNum]
+
+	# Also want to remove some negative regions if there are a lot more negatives in the region than positives.
+	posLocs = np.where(np.logical_and(outValidBox[:, :, :] == 1, outRpnOverlap[:, :, :] == 1))
+	negLocs = np.where(np.logical_and(outValidBox[:, :, :] == 1, outRpnOverlap[:, :, :] == 0))
+
+	# Want about even number of positive and negative locations, so turn off extra positive ones and
+	# limit remaining negative ones to the max number of regions
+	posRegionCount = len(posLocs[0])
+	if posRegionCount > maxRegions / 2:
+		# randomly make some positive regions invalid
+		locs = random.sample(range(posRegionCount), int(posRegionCount - maxRegions / 2))
+		outValidBox[posLocs[0][locs], posLocs[1][locs], posLocs[2][locs]] = 0
+		posRegionCount = maxRegions / 2
+
+	if len(negLocs[0]) + posRegionCount > maxRegions:
+		# randomly remove negative regions until in size
+		locs = random.sample(range(len(negLocs[0])), len(negLocs[0]) - int(posRegionCount))
+		outValidBox[negLocs[0][locs], negLocs[1][locs], negLocs[2][locs]] = 0
+
+	# Format results.
+	# outClass = Array of x, y, valid + rpnOverlap
+	#	valid = 0 if bounding box is not valid at anchor, 1 if bounding box is valid
+	#	rpnOverlap = 0 if object is not at anchor, 1 if one is.
+	#	If sum at end is 1, then the anchor is valid, but we know there is nothing there.
+	#	If sum is 2, then the anchor is valid and there is an object there
+	#	If sum is 0, we don't know what is there.
+	# outRegress = Array of x, y, <regression for each anchor> + rpnOverlap
+	outClass = outValidBox + outRpnOverlap
+	outRegress = outRegress + np.repeat(outRpnOverlap, 7, axis=2)
+
 	return [outClass, outRegress]
 
 
+def rpnToImage(classData, regressData):
+	'''
+	Converts output of neural net into bounding boxes.
+	:param classData:
+	:param regressData:
+	:return:
+	'''
+	pass
+
+
+def imageToRPN(sample):
+	'''
+	Given a sample, retrieve the ground truth object in the scene and convert to RPN
+	:param sample: The sample JSON file to process.
+	:return: OutClass and OutRegress for training.
+	'''
+	# pre-process labels
+	labels = []
+	annsTokens = sample['anns']
+	my_sample_data = level5Data.get('sample_data', sample['data']['LIDAR_TOP'])
+	ego = level5Data.get('ego_pose', my_sample_data['ego_pose_token'])
+	for token in annsTokens:
+		ann = level5Data.get('sample_annotation', token)
+
+		# do a inverse transpose to get the annotation data from global coords to local
+		translation = np.array(ann['translation']).reshape((1, -1))
+		translation = translation - np.array(ego['translation'])
+		translation = rotate_points(translation, np.array(ego['rotation']), True)
+
+		row = []
+		row += [translation[0, 0]]
+		row += [translation[0, 1]]
+		row += [translation[0, 2]]
+		#     row = ann['translation']
+		#     row = [x / 100 for x in row]  # translate to m
+		row += ann['size']
+		quaternion = Quaternion(ann['rotation'])
+		row += [quaternion.yaw_pitch_roll[0]]
+		instance = level5Data.get('instance', ann['instance_token'])
+		category = level5Data.get('category', instance['category_token'])['name']
+		# row += [catToNum[category]]
+		# Only adds cars within our range of -50 to 50 in x and y
+		if catToNum[category] == 0 \
+				and row[0] >= -50 and row[0] <= 50 \
+				and row[1] >= -50 and row[1] <= 50:
+			labels.append(row)
+	labels = np.array(labels)
+	# for right now, only care about cars
+
+	outClass, outRegress = preprocessLabels(labels)
+	return outClass, outRegress
+
+
 def saveLabelsForSample(samples, outPath):
+	'''
+	Converts Lidar data from a sample into rpn form. Saves it as a npy file
+	:param samples:
+	:param outPath:
+	:return:
+	'''
+
 	classMap = []
 	regressMap = []
-	for sample in samples:
-		labels = []
-		annsTokens = sample['anns']
-		for token in annsTokens:
-			ann = level5Data.get('sample_annotation', token)
-			row = ann['translation']
-			row += ann['size']
-			quaternion = Quaternion(ann['rotation'])
-			row += [quaternion.yaw_pitch_roll[0]]
-			instance = level5Data.get('instance', ann['instance_token'])
-			category = level5Data.get('category', instance['category_token'])['name']
-			row += [catToNum[category]]
-			labels.append(row)
-		labels = np.array(labels)
-		outClass, outRegress = preprocessLabels(labels)
-		outClass = np.reshape(outClass, (1,) + outClass.shape)
-		outRegress = np.reshape(outRegress, (1,) + outRegress.shape)
+	for i in range(len(samples)):
+		print('doing sample', str(i))
+		outClass, outRegress = imageToRPN(samples[i])
+		print('sample ' + str(i) + ' finished')
 		classMap.append(outClass)
 		regressMap.append(outRegress)
-	classMap = np.stack(classMap, 0)
-	regressMap = np.stack(regressMap, 0)
+	classMap = np.stack(classMap)
+	regressMap = np.stack(regressMap)
+
+	classShapeArray = np.array(classMap.shape)
+	regressShapeArray = np.array(regressMap.shape)
+
 	np.save(outPath + '\\labelsClass.npy', classMap)
 	np.save(outPath + '\\regressClass.npy', regressMap)
+	np.save(outPath + '\\labelsShape.npy', classShapeArray)
+	np.save(outPath + '\\regressShape.npy', regressShapeArray)
 
 
 def saveTrainDataForSample(samples):
@@ -281,6 +445,11 @@ if __name__ == '__main__':
 		json_path=dataDir + '\\train_data',
 		verbose=True
 	)
-	scene = level5Data.scene[0]
-	sample = level5Data.get('sample', scene['first_sample_token'])
-	saveLabelsForSample([sample], 'labels')
+	# scene = level5Data.scene[0]
+	# sample = level5Data.get('sample', scene['first_sample_token'])
+	# sample2 = level5Data.get('sample', sample['next'])
+	# saveLabelsForSample([sample, sample2], 'labels')
+	samples = []
+	for scene in level5Data.scene:
+		samples.append(level5Data.get('sample', scene['first_sample_token']))
+	saveLabelsForSample(samples[0:1], 'C:\\Users\\Skyler\\Documents\\_CS539_ml\\project\\Lyft-Object-Detection\\labels3')
