@@ -11,43 +11,45 @@ import math
 import tensorflow as tf
 from shapely.geometry import Polygon
 import random
+import Constants
 
-# constants
-# size of voxel
-voxelx = 0.5
-voxely = 0.25
-voxelz = 0.25
 
-# Number of voxels in space that we care about
-nx = int(100 / voxelx)  # -50 to 50 m
-ny = int(100 / voxely)
-nz = int(2 / voxelz)
-
-# Limit of points per voxel to reduce size of data.
-maxPoints = 35
-
-# number of anchors
-anchors = [[1.6, 3.9, 1.56, 0], [1.6, 3.9, 1.56, math.pi / 2]]
-iouLowerBound = 0.45
-iouUpperBound = 0.6
-
-# region limiter
-maxRegions = 256
-
-# map of categories:
-catToNum = {
-	'car': 0,
-	'pedestrian': 1,
-	'animal': 2,
-	'other_vehicle': 3,
-	'bus': 4,
-	'motorcycle': 5,
-	'truck': 6,
-	'emergency_vehicle': 7,
-	'bicycle': 8
-}
-
-dataDir = 'E:\\CS539 Machine Learning\\3d-object-detection-for-autonomous-vehicles'
+# # constants
+# # size of voxel
+# voxelx = 0.5
+# voxely = 0.25
+# voxelz = 0.25
+#
+# # Number of voxels in space that we care about
+# nx = int(100 / voxelx)  # -50 to 50 m
+# ny = int(100 / voxely)
+# nz = int(2 / voxelz)
+#
+# # Limit of points per voxel to reduce size of data.
+# maxPoints = 35
+#
+# # number of anchors
+# anchors = [[1.6, 3.9, 1.56, 0], [1.6, 3.9, 1.56, math.pi / 2]]
+# iouLowerBound = 0.45
+# iouUpperBound = 0.6
+#
+# # region limiter
+# maxRegions = 256
+#
+# # map of categories:
+# catToNum = {
+# 	'car': 0,
+# 	'pedestrian': 1,
+# 	'animal': 2,
+# 	'other_vehicle': 3,
+# 	'bus': 4,
+# 	'motorcycle': 5,
+# 	'truck': 6,
+# 	'emergency_vehicle': 7,
+# 	'bicycle': 8
+# }
+#
+# dataDir = 'E:\\CS539 Machine Learning\\3d-object-detection-for-autonomous-vehicles'
 
 
 # Uses quaternions to rotate all points in a scene to match the location of the lidar sensor on the car.
@@ -198,14 +200,14 @@ def preprocessLabels(data):
 	'''
 	# ASSUMES THAT OUTPUT OF RPN IS MAP DIVIDED BY 2. Our network does this.
 	# Assumes data input is in cm.
-	outX = nx // 2
-	outY = ny // 2
-	voxelXSize = voxelx * 2
-	voxelYSize = voxely * 2
+	outX = Constants.nx // 2
+	outY = Constants.ny // 2
+	voxelXSize = Constants.voxelx * 2
+	voxelYSize = Constants.voxely * 2
 	# size is based off nx and ny (just divide by 2). 7 comes from x, y, z, l ,w ,h, yaw
-	outRegress = np.zeros((outX, outY, len(anchors) * 7))
-	outValidBox = np.zeros((outX, outY, len(anchors)))
-	outRpnOverlap = np.zeros((outX, outY, len(anchors)))
+	outRegress = np.zeros((outX, outY, len(Constants.anchors) * 7))
+	outValidBox = np.zeros((outX, outY, len(Constants.anchors)))
+	outRpnOverlap = np.zeros((outX, outY, len(Constants.anchors)))
 
 	# save the best IoU for a specific bounding box (the label)
 	bestIouForBox = np.zeros(len(data))
@@ -214,22 +216,22 @@ def preprocessLabels(data):
 	bestRegressionForBox = np.zeros((len(data), 7))
 
 	# scale back l and w because we cut the size of the feature space by 2 through our network
-	fixedData = data * fixBoxScaling(data.shape, outX, outY, nx, ny)
+	fixedData = data * fixBoxScaling(data.shape, outX, outY, Constants.nx, Constants.ny)
 
 	# Iterate through anchors and bounding boxes in fixedData and update outRegress and outClass as necessary based on IoU
 	centerZ = 1.  # hard set z center of anchors to 1. m dude just trust me.
-	for i in range(len(anchors)):
+	for i in range(len(Constants.anchors)):
 		for xVoxel in range(int(-outX / 2), int(outX / 2)):
 			# print(xVoxel)
 			# Do calculations in terms of cm now.
 			centerX = voxelXSize * xVoxel + (voxelXSize / 2)
-			if centerX - (anchors[i][0] / 2) < voxelXSize * int(-outX / 2) \
-					or centerX + (anchors[i][0] / 2) > voxelXSize * int(outX / 2):
+			if centerX - (Constants.anchors[i][0] / 2) < voxelXSize * int(-outX / 2) \
+					or centerX + (Constants.anchors[i][0] / 2) > voxelXSize * int(outX / 2):
 				continue
 			for yVoxel in range(int(-outY / 2), int(outY / 2)):
 				centerY = voxelYSize * yVoxel + (voxelYSize / 2)
-				if centerY - (anchors[i][1] / 2) < voxelYSize * int(-outY / 2) \
-						or centerY + (anchors[i][1] / 2) > voxelYSize * int(outY / 2):
+				if centerY - (Constants.anchors[i][1] / 2) < voxelYSize * int(-outY / 2) \
+						or centerY + (Constants.anchors[i][1] / 2) > voxelYSize * int(outY / 2):
 					continue
 				# if we get here, then the anchor is within the range of the area we want to look at
 				# now look at every bounding box for best IoU
@@ -241,7 +243,7 @@ def preprocessLabels(data):
 				for labelBoxNum in range(len(fixedData)):
 					# CenterX, CenterY, CenterZ are the centers of the anchors.
 					# Create anchorbox representation using set anchor sizes (which includes yaw)
-					anchorBox = [centerX, centerY, centerZ] + anchors[i]
+					anchorBox = [centerX, centerY, centerZ] + Constants.anchors[i]
 					iou = calculateIoU(anchorBox, fixedData[labelBoxNum])
 
 					# calculate regression values in case we need them
@@ -269,13 +271,13 @@ def preprocessLabels(data):
 						bestIouForBox[labelBoxNum] = iou
 						bestAnchorForBox[labelBoxNum] = (xVoxel, yVoxel, i)
 						bestRegressionForBox[labelBoxNum] = (tx, ty, tz, tl, tw, th, tyaw)
-					if iou >= iouUpperBound:
+					if iou >= Constants.iouUpperBound:
 						boxType = 'pos'
 						countAnchorsForBox[labelBoxNum] += 1
 						if iou > bestIouForLoc:
 							bestIouForLoc = iou
 							bestRegression = (tx, ty, tz, tl, tw, th, tyaw)
-					if iouLowerBound < iou <= iouUpperBound and boxType != 'pos':
+					if Constants.iouLowerBound < iou <= Constants.iouUpperBound and boxType != 'pos':
 						boxType = 'neutral'
 
 				if boxType == 'neg':
@@ -302,7 +304,7 @@ def preprocessLabels(data):
 			outValidBox[bestAnchor[0], bestAnchor[1], bestAnchor[2]] = 1
 			outRpnOverlap[bestAnchor[0], bestAnchor[1], bestAnchor[2]] = 1
 			outRegress[bestAnchor[0], bestAnchor[1],
-					   bestAnchor[2] * 7 : bestAnchor[2] * 7 + 7] = bestRegressionForBox[labelBoxNum]
+			bestAnchor[2] * 7: bestAnchor[2] * 7 + 7] = bestRegressionForBox[labelBoxNum]
 
 	# Also want to remove some negative regions if there are a lot more negatives in the region than positives.
 	posLocs = np.where(np.logical_and(outValidBox[:, :, :] == 1, outRpnOverlap[:, :, :] == 1))
@@ -311,13 +313,13 @@ def preprocessLabels(data):
 	# Want about even number of positive and negative locations, so turn off extra positive ones and
 	# limit remaining negative ones to the max number of regions
 	posRegionCount = len(posLocs[0])
-	if posRegionCount > maxRegions / 2:
+	if posRegionCount > Constants.maxRegions / 2:
 		# randomly make some positive regions invalid
-		locs = random.sample(range(posRegionCount), int(posRegionCount - maxRegions / 2))
+		locs = random.sample(range(posRegionCount), int(posRegionCount - Constants.maxRegions / 2))
 		outValidBox[posLocs[0][locs], posLocs[1][locs], posLocs[2][locs]] = 0
-		posRegionCount = maxRegions / 2
+		posRegionCount = Constants.maxRegions / 2
 
-	if len(negLocs[0]) + posRegionCount > maxRegions:
+	if len(negLocs[0]) + posRegionCount > Constants.maxRegions:
 		# randomly remove negative regions until in size
 		locs = random.sample(range(len(negLocs[0])), len(negLocs[0]) - int(posRegionCount))
 		outValidBox[negLocs[0][locs], negLocs[1][locs], negLocs[2][locs]] = 0
@@ -334,16 +336,6 @@ def preprocessLabels(data):
 	outRegress = outRegress + np.repeat(outRpnOverlap, 7, axis=2)
 
 	return [outClass, outRegress]
-
-
-def rpnToImage(classData, regressData):
-	'''
-	Converts output of neural net into bounding boxes.
-	:param classData:
-	:param regressData:
-	:return:
-	'''
-	pass
 
 
 def imageToRPN(sample):
@@ -378,7 +370,7 @@ def imageToRPN(sample):
 		category = level5Data.get('category', instance['category_token'])['name']
 		# row += [catToNum[category]]
 		# Only adds cars within our range of -50 to 50 in x and y
-		if catToNum[category] == 0 \
+		if Constants.catToNum[category] == 0 \
 				and row[0] >= -50 and row[0] <= 50 \
 				and row[1] >= -50 and row[1] <= 50:
 			labels.append(row)
@@ -392,9 +384,8 @@ def imageToRPN(sample):
 def saveLabelsForSample(samples, outPath):
 	'''
 	Converts Lidar data from a sample into rpn form. Saves it as a npy file
-	:param samples:
-	:param outPath:
-	:return:
+	:param samples: List of samples to parse for cars and save as input to network
+	:param outPath: Location to save npy files.
 	'''
 
 	classMap = []
@@ -423,10 +414,10 @@ def saveTrainDataForSample(samples):
 	for sample in samples:
 		# pre-process data
 		import time
-		testSampleLidarPoints = combine_lidar_data(sample, dataDir)
+		testSampleLidarPoints = combine_lidar_data(sample, Constants.dataDir)
 		startTime = time.time()
-		testVFEPoints = VFE_preprocessing(testSampleLidarPoints, voxelx, voxely, voxelz,
-										  maxPoints, nx // 2, ny // 2, nz)
+		testVFEPoints = VFE_preprocessing(testSampleLidarPoints, Constants.voxelx, Constants.voxely, Constants.voxelz,
+										  Constants.maxPoints, Constants.nx // 2, Constants.ny // 2, Constants.nz)
 		endTime = time.time()
 		print(endTime - startTime)
 		print(testVFEPoints.shape)
@@ -441,8 +432,8 @@ def saveTrainDataForSample(samples):
 if __name__ == '__main__':
 	# load dataset
 	level5Data = LyftDataset(
-		data_path=dataDir,
-		json_path=dataDir + '\\train_data',
+		data_path=Constants.dataDir,
+		json_path=Constants.dataDir + '\\train_data',
 		verbose=True
 	)
 	# scene = level5Data.scene[0]
@@ -452,4 +443,5 @@ if __name__ == '__main__':
 	samples = []
 	for scene in level5Data.scene:
 		samples.append(level5Data.get('sample', scene['first_sample_token']))
-	saveLabelsForSample(samples[0:1], 'C:\\Users\\Skyler\\Documents\\_CS539_ml\\project\\Lyft-Object-Detection\\labels3')
+	saveLabelsForSample(samples[0:1],
+						'C:\\Users\\Skyler\\Documents\\_CS539_ml\\project\\Lyft-Object-Detection\\labels3')
