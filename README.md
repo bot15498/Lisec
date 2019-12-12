@@ -23,9 +23,33 @@ We use this data in tandem with the Lyft-Object-Detection SDK. In order training
 work, you must specify the location of the Lyft Autonomous Vehicle dataset. This location is
 saved in the Constants.py file.
 
+The Lyft-Object-Detection SDK has a key object called the Level 5 Dataset.
+This object reference is needed for most functions in this repo.
+
 ## Training the Model
 The model is very big, and will not fit in a normal amount of RAM. We recommend training
 on a server or cluster with at least 500 GB of usable RAM.
+
+Training the model is done with the model_training.py. The two key functions
+in this file are train() and train_with_model(). train() requires a list
+of samples from the Level 5 Dataset to train on, the reference to the 
+Level 5 Dataset, and a location to save the model to. train_with_model()
+is a similar function but allows the user to load a model from disk.
+
+## Predicting Using the Model
+Predicting is done by running Predict.py. The main function in this file
+is predictMain(), which requires a sample from the Level 5 Dataset, the 
+Level 5 dataset object, the model to predict with, and an output path
+to save the resulting numpy files.
+
+## Visualizing Results
+Converting predictions to bounding boxes is done with the rpnToRegion.py
+script. The script loads the output of Predict.py as well as a reference
+to the Level 5 Dataset. The program will then apply a transformation from
+the RPN output to 20 potential cars in the sample. This result will be 
+plotted with the original Lidar data and the actual annotations of the 
+scene. The IoU comparison between the prediction with the ground truth 
+will also be printed to the console. 
 
 ## Other Notes / Fixes
 There are certain features of Keras and Tensorflow that prevent the network
