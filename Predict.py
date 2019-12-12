@@ -1,7 +1,7 @@
 from lyft_dataset_sdk.lyftdataset import LyftDataset
 from tensorflow.keras.models import load_model
 from tensorflow import SparseTensor, sparse
-from TestLearner import RepeatLayer, MaxPoolingVFELayer, combine_lidar_data, VFE_preprocessing
+from model_training import RepeatLayer, MaxPoolingVFELayer, combine_lidar_data, VFE_preprocessing
 import numpy as np
 import Constants
 

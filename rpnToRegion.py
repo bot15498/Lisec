@@ -4,7 +4,7 @@ import math
 from lyft_dataset_sdk.lyftdataset import LyftDataset
 import numpy as np
 import serialize_data as LoadDataModule
-from TestLearner import combine_lidar_data
+from model_training import combine_lidar_data
 from pyquaternion import Quaternion
 from shapely.ops import cascaded_union
 from shapely.geometry import Polygon
@@ -267,8 +267,8 @@ if __name__ == '__main__':
 		json_path=dataDir + '\\train_data',
 		verbose=True
 	)
-	predictClass = np.load('fixedTheta\\sample0_label.npy')
-	predictRegress = np.load('fixedTheta\\sample0_regress.npy')
+	predictClass = np.load('fixedTheta\\sample2_label.npy')
+	predictRegress = np.load('fixedTheta\\sample2_regress.npy')
 
 	predictClass = np.reshape(predictClass, predictClass.shape[1:])
 	predictRegress = np.reshape(predictRegress, predictRegress.shape[1:])
@@ -280,7 +280,7 @@ if __name__ == '__main__':
 	boxes[:, 1] = boxes[:, 1] - 50
 
 	# now lets do some checking
-	sample = level5Data.get('sample', level5Data.scene[0]['first_sample_token'])
+	sample = level5Data.get('sample', level5Data.scene[2]['first_sample_token'])
 	lidarPoints = combine_lidar_data(sample, dataDir, level5Data)
 	fig = plt.figure(figsize=(12, 12))
 	ax = fig.add_subplot(111)

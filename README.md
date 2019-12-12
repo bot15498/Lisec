@@ -37,8 +37,7 @@ the shape of a SparseTensor is a Tensor, so you cannot represent an
 input SparseTensor's variable size with a Tensor. The solution to this is 
 to transform the input to the network to a dense Tensor. The consequence 
 is the model does not train on most computer's memory. The model was trained
-on a server with 512 GB of RAM and a AMD Opteron 6380 processor. Even with
-the increased RAM, our model can only run ome batch at once.
+on a server with 512 GB of RAM and a AMD Opteron 6380 processor. 
 
 Some Keras layers also do not have support for input Tensors of a rank
 5 or higher. The major layer that caused this problem was the Dense 
